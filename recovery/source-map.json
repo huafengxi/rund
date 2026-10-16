@@ -2,7 +2,7 @@
   "task_id": "rd6-s-175748",
   "source_repo": "agent-platform",
   "baseline": "990253da3b5c5ec83fd43a2a463f39ed6d42aadf",
-  "frozen": "4ac4631fbdbf27f3c400805b233dc1d7a9892d46",
+  "frozen": "1f650e88357b29908526245f6b7ccae2d5540464",
   "original_main": "6124dba2a36c1144afd963a3a42aa76a5cc053f7",
   "projection_tip": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
   "records": [
@@ -263,6 +263,22 @@
       "target_parent": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
       "target_commit": null,
       "disposition": "no-op: no owned path change"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "1f650e88357b29908526245f6b7ccae2d5540464",
+      "subject": "feat(agentd): show current blocking asks and dialogs on task tab [task-tab-wait-171006]",
+      "changes": [],
+      "target_parent": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change",
+      "cross_module_paths": [
+        "agentd/report.py",
+        "agentd/test_wait_state.py",
+        "agentd/wait_state.py",
+        "pi-wrap/pi-rpc-wrap.py"
+      ],
+      "dependency_note": "agentd pin remains 9625bdc15f853e49a6312d20dc429e23330e3d89; source agentd/pi-wrap increments require separate fixed-revision integration"
     }
   ]
 }

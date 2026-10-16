@@ -24,8 +24,11 @@ supervision is changed. The production gate stays closed.
 
 Original main `6124dba2a36c1144afd963a3a42aa76a5cc053f7` remains the ancestor;
 source baseline `990253da3b5c5ec83fd43a2a463f39ed6d42aadf` through frozen
-`4ac4631fbdbf27f3c400805b233dc1d7a9892d46` contains 13 first-parent records:
-3 projections, 10 no-ops. Source root README mechanism material is mapped into
+`1f650e88357b29908526245f6b7ccae2d5540464` contains 14 first-parent records:
+3 projections, 11 no-ops. The final source refresh contains only agentd/report.py,
+agentd/test_wait_state.py, agentd/wait_state.py and pi-wrap/pi-rpc-wrap.py; it is
+recorded as a serviced no-op. These cross-module increments are not part of the
+fixed agentd dependency above and require separate fixed-revision integration. Source root README mechanism material is mapped into
 the standalone README; portable/installers, other modules, integrated deployment
 and integration-runner material belong elsewhere. No installer is revived.
 
