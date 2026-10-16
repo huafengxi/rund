@@ -1,24 +1,22 @@
-"""Discover caller workspaces for canonical module paths."""
+"""Local workspace-root contract v1 (source: agent-platform/platform_paths.py).
+
+Source identity follows realpath, independently of workspace overrides.
+No platform marker, integrated checkout, or module list is required.
+"""
 import os
 from pathlib import Path
 import sys
 
-MODULES = ("agentd", "pi-wrap", "agents-sync", "serviced", "heartbeatd", "git-sync")
-
-
 def workspace_root(source):
-    """Return the caller root without depending on cwd or the checkout name.
+    """Nonempty PLATFORM_WORKSPACE (expanded/absolute), else real repo parent.
 
-    Legacy copies without the platform marker retain their parent-root contract.
+    Callers with CLI/module-specific roots choose those before calling here.
+    serviced has no CLI root option; its override is PLATFORM_WORKSPACE.
     """
-    lexical = Path(os.path.abspath(source))
-    package = lexical.resolve().parent.parent
-    if not (package / ".platform-root").is_file():
-        return str(lexical.parent.parent)
     override = os.environ.get("PLATFORM_WORKSPACE")
     if override:
         return str(Path(override).expanduser().resolve())
-    return str(package.parent)
+    return str(Path(source).resolve().parent.parent)
 
 
 if __name__ == "__main__":

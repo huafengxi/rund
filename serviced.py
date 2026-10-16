@@ -89,6 +89,7 @@ Invariants (rule bodies):
      unaffected by the `key=value` runtime lines that follow it.
 """
 import glob
+import importlib.util
 import json
 import os
 import platform
@@ -103,12 +104,41 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+SOURCE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SOURCE_DIR))
 from platform_paths import workspace_root
 
 WS = Path(workspace_root(__file__))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agentd"))
-import envscrub  # noqa: E402  spawn 环境洗刷名单单点
+
+
+def _load_envscrub():
+    """Load agentd's sole scrub implementation, never a workspace/platform copy.
+
+    Explicit AGENTD_DIR is authoritative, including invalid configurations.
+    With it unset, a sibling agentd checkout is a development convenience only.
+    Publication pins the compatible dependency in recovery/dependencies.json.
+    """
+    configured = os.environ.get("AGENTD_DIR")
+    if configured is not None and not configured.strip():
+        sys.exit("error: AGENTD_DIR is empty; set it to the pinned agentd checkout "
+                 "or unset it for the development sibling layout")
+    agentd = (Path(configured).expanduser().resolve() if configured is not None
+              else SOURCE_DIR.parent / "agentd")
+    source = agentd / "envscrub.py"
+    try:
+        spec = importlib.util.spec_from_file_location("_serviced_agentd_envscrub", source)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        if not callable(getattr(module, "scrub_env", None)):
+            raise ImportError("scrub_env interface missing")
+        return module
+    except (OSError, ImportError, SyntaxError, AttributeError) as error:
+        sys.exit(f"error: serviced requires agentd envscrub at {source}: {error}; "
+                 "set AGENTD_DIR to the pinned agentd checkout "
+                 "(see recovery/dependencies.json)")
+
+
+envscrub = _load_envscrub()
 SERVICES_DIR = WS / "services"
 PROFILES_DIR = SERVICES_DIR / "profiles"
 DAEMONS_DIR = SERVICES_DIR / "daemons"

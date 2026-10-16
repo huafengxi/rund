@@ -43,8 +43,10 @@
 set -u
 set -m  # job control：后台子进程自成进程组（正确性要求，缘由见头注）
 
-MODULE_DIR="$(cd "$(dirname "$0")" && pwd -P)" || exit 1
-WS="$(python3 "${MODULE_DIR}/../platform_paths.py" "$0")" || exit 1
+# Resolve source identity separately from the caller workspace, also when this
+# entry is a relative/absolute symlink. Python is already required by sync.
+MODULE_DIR="$(python3 -c 'import os,sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "$0")" || exit 1
+WS="$(python3 "${MODULE_DIR}/platform_paths.py" "$0")" || exit 1
 SYNC="${MODULE_DIR}/serviced.py"
 QUIET_LINE="no drift, nothing to do"
 

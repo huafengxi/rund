@@ -1,0 +1,15 @@
+{
+  "agentd": {
+    "revision": "9625bdc15f853e49a6312d20dc429e23330e3d89",
+    "module": "envscrub.py",
+    "envscrub_sha256": "4f4845e49b889f41bfd8e950e9313dcb1b3146377927cd339c4805735bb31f4a",
+    "interface": "scrub_env(base=None, keep=frozenset(), strip_third_party=False) -> dict",
+    "serviced_call": "scrub_env(keep=frozenset())",
+    "location": {
+      "explicit": "AGENTD_DIR (authoritative, expanded/absolute; empty rejected)",
+      "development": "real serviced source parent / agentd",
+      "forbidden": "integrated-platform and import-path fallback; copied policy lists"
+    },
+    "pin_enforcement": "caller selects revision; recovery test driver verifies dependency checkout HEAD and module digest; runtime loads exact selected file"
+  }
+}
