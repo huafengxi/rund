@@ -1,0 +1,268 @@
+{
+  "task_id": "rd6-s-175748",
+  "source_repo": "agent-platform",
+  "baseline": "990253da3b5c5ec83fd43a2a463f39ed6d42aadf",
+  "frozen": "4ac4631fbdbf27f3c400805b233dc1d7a9892d46",
+  "original_main": "6124dba2a36c1144afd963a3a42aa76a5cc053f7",
+  "projection_tip": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+  "records": [
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "9809211b1e91adabb0dfda570bd4a79dc4313d21",
+      "subject": "platform: preserve caller roots across consolidated modules",
+      "changes": [
+        {
+          "source": "serviced/README.md",
+          "target": "README.md",
+          "before": {
+            "mode": "100644",
+            "oid": "80e46a8489e3d9e74d74f1ec9fdc1e5d0bb6f6ec"
+          },
+          "after": {
+            "mode": "100644",
+            "oid": "5c357e8fa9fa4fdfaaea1c357be13d72d50a5f44"
+          },
+          "deleted": false
+        },
+        {
+          "source": "platform_paths.py",
+          "target": "platform_paths.py",
+          "before": null,
+          "after": {
+            "mode": "100644",
+            "oid": "1bda46c0d34cedfbd81cb9312536ffbee36eeeb7"
+          },
+          "deleted": false
+        },
+        {
+          "source": "serviced/serviced.py",
+          "target": "serviced.py",
+          "before": {
+            "mode": "100755",
+            "oid": "a39739e040e6259a25590c766f32647c943d8818"
+          },
+          "after": {
+            "mode": "100755",
+            "oid": "b6698d57fa5104adf2edb21a2f2c9b02e7136bb6"
+          },
+          "deleted": false
+        },
+        {
+          "source": "serviced/sync-loop.sh",
+          "target": "sync-loop.sh",
+          "before": {
+            "mode": "100755",
+            "oid": "630fdd7158f43db44c06f1a66a9a8a58dea8257e"
+          },
+          "after": {
+            "mode": "100755",
+            "oid": "b234ac014a7671cf81868b16ddb73ed7f35a18d5"
+          },
+          "deleted": false
+        },
+        {
+          "source": "test_platform_paths.py",
+          "target": "test_platform_paths.py",
+          "before": null,
+          "after": {
+            "mode": "100644",
+            "oid": "6943ef066afd9b356724dc96a3919ec4a274c3bc"
+          },
+          "deleted": false
+        }
+      ],
+      "target_parent": "6124dba2a36c1144afd963a3a42aa76a5cc053f7",
+      "target_commit": "128bddb80a102f878dcd52bbc2847cd89d292a0b",
+      "disposition": "projected",
+      "root_readme": "shared mechanism root/default/override material retained in standalone README adaptation; integrated installer/portable/other modules excluded by ownership"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "4dd1b8eaa958ef5f236afed78a74be30e43d030b",
+      "subject": "refactor: use canonical module paths without workspace aliases",
+      "changes": [
+        {
+          "source": "platform_paths.py",
+          "target": "platform_paths.py",
+          "before": {
+            "mode": "100644",
+            "oid": "1bda46c0d34cedfbd81cb9312536ffbee36eeeb7"
+          },
+          "after": {
+            "mode": "100644",
+            "oid": "fac7d40d7846eaf80865215c413071d3a7627d1a"
+          },
+          "deleted": false
+        },
+        {
+          "source": "serviced/sync-loop.sh",
+          "target": "sync-loop.sh",
+          "before": {
+            "mode": "100755",
+            "oid": "b234ac014a7671cf81868b16ddb73ed7f35a18d5"
+          },
+          "after": {
+            "mode": "100755",
+            "oid": "b9db054db1146d8dba4d4a16204251c66ac28ad0"
+          },
+          "deleted": false
+        },
+        {
+          "source": "test_platform_paths.py",
+          "target": "test_platform_paths.py",
+          "before": {
+            "mode": "100644",
+            "oid": "6943ef066afd9b356724dc96a3919ec4a274c3bc"
+          },
+          "after": {
+            "mode": "100644",
+            "oid": "42f1e3419ba1007398cd431ecc19d313e2bb53a5"
+          },
+          "deleted": false
+        }
+      ],
+      "target_parent": "128bddb80a102f878dcd52bbc2847cd89d292a0b",
+      "target_commit": "0b2a72b0cdb42a11a867f332d327183bf9323bd0",
+      "disposition": "projected",
+      "root_readme": "shared mechanism root/default/override material retained in standalone README adaptation; integrated installer/portable/other modules excluded by ownership"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "b5de241e352968bd317176e221050f6950089947",
+      "subject": "refactor: centralize task publication and lifecycle predicates",
+      "changes": [],
+      "target_parent": "0b2a72b0cdb42a11a867f332d327183bf9323bd0",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "c4a35640c77a9356ce61addd6a1cde918706bff3",
+      "subject": "fix: preserve scheduler defaults on Bash 3.2",
+      "changes": [],
+      "target_parent": "0b2a72b0cdb42a11a867f332d327183bf9323bd0",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "84184041bef2e74d05164c2fc321f4b44a1717e5",
+      "subject": "refactor: isolate environment loading and share deletion contracts",
+      "changes": [
+        {
+          "source": "serviced/README.md",
+          "target": "README.md",
+          "before": {
+            "mode": "100644",
+            "oid": "5c357e8fa9fa4fdfaaea1c357be13d72d50a5f44"
+          },
+          "after": {
+            "mode": "100644",
+            "oid": "0a1a4f50245ae4ada345c7ef048a998f1ea35953"
+          },
+          "deleted": false
+        },
+        {
+          "source": "serviced/serviced.py",
+          "target": "serviced.py",
+          "before": {
+            "mode": "100755",
+            "oid": "b6698d57fa5104adf2edb21a2f2c9b02e7136bb6"
+          },
+          "after": {
+            "mode": "100755",
+            "oid": "6b38f8799ec302d966de0857cab07f8475d6cda8"
+          },
+          "deleted": false
+        },
+        {
+          "source": "serviced/test_env_loader.py",
+          "target": "test_env_loader.py",
+          "before": null,
+          "after": {
+            "mode": "100644",
+            "oid": "d3bf1a029ab35391932a77c6b64680db7aa1e401"
+          },
+          "deleted": false
+        }
+      ],
+      "target_parent": "0b2a72b0cdb42a11a867f332d327183bf9323bd0",
+      "target_commit": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+      "disposition": "projected"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "00a44146804f35a5f005d574d76b772dee159cef",
+      "subject": "refactor: share task observations and structured scheduling decisions",
+      "changes": [],
+      "target_parent": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "e582727a0d02b78d08914aed89fd7479e0159a19",
+      "subject": "refactor(agentd): declare resident lifecycle independently of commands",
+      "changes": [],
+      "target_parent": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "ba1e707af9163b4b7ae0b554c0525d3fe5210c72",
+      "subject": "fix(agentd): resolve web reports from explicit source context",
+      "changes": [],
+      "target_parent": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "68b595f33ab50108418c9a969378e7a471c200dc",
+      "subject": "fix(pi-wrap): derive probe workspace from agent root [fbhjlp]",
+      "changes": [],
+      "target_parent": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "da1961bd02aca8cbf0aa72a922ef0773e757c470",
+      "subject": "style(agentd): simplify task widgets to workspace-relative commands [taskId: command-center-01a13fc6]",
+      "changes": [],
+      "target_parent": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "f93b8eb4945bf8bf52ab0773da6623978676acd3",
+      "subject": "feat(portable): add allowlisted offline local task installer",
+      "changes": [],
+      "target_parent": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change",
+      "root_readme": "shared mechanism root/default/override material retained in standalone README adaptation; integrated installer/portable/other modules excluded by ownership"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "fb758234da0bd717d511dd41999679fa0bbf4427",
+      "subject": "feat(portable): replace copy installer with convention-first in-place launcher",
+      "changes": [],
+      "target_parent": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change",
+      "root_readme": "shared mechanism root/default/override material retained in standalone README adaptation; integrated installer/portable/other modules excluded by ownership"
+    },
+    {
+      "source_repo": "agent-platform",
+      "source_commit": "4ac4631fbdbf27f3c400805b233dc1d7a9892d46",
+      "subject": "feat(pi-wrap): resolve profile thinking defaults [c8tpr5]",
+      "changes": [],
+      "target_parent": "0bb6dd4e01e1c9e86b081af60741f297059f3173",
+      "target_commit": null,
+      "disposition": "no-op: no owned path change"
+    }
+  ]
+}

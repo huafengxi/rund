@@ -1,0 +1,226 @@
+{
+  ".gitignore": {
+    "original": {
+      "mode": "100644",
+      "oid": "7a60b85e148f80966a550e5ab6a762a907c69ca6"
+    },
+    "source": {
+      "mode": "100644",
+      "oid": "7a60b85e148f80966a550e5ab6a762a907c69ca6"
+    },
+    "projected": {
+      "mode": "100644",
+      "oid": "7a60b85e148f80966a550e5ab6a762a907c69ca6"
+    },
+    "delivered": {
+      "mode": "100644",
+      "oid": "7a60b85e148f80966a550e5ab6a762a907c69ca6"
+    },
+    "deleted": false,
+    "reason": "Unchanged or exact source projection; no independent adaptation."
+  },
+  "README.md": {
+    "original": {
+      "mode": "100644",
+      "oid": "80e46a8489e3d9e74d74f1ec9fdc1e5d0bb6f6ec"
+    },
+    "source": {
+      "mode": "100644",
+      "oid": "0a1a4f50245ae4ada345c7ef048a998f1ea35953"
+    },
+    "projected": {
+      "mode": "100644",
+      "oid": "0a1a4f50245ae4ada345c7ef048a998f1ea35953"
+    },
+    "delivered": {
+      "mode": "100644",
+      "oid": "7f3456ab402f739d34ae2116558b359bdf90dd35"
+    },
+    "deleted": false,
+    "reason": "Standalone mechanism documentation, root/env contracts and full dependency pin; integrated platform/deployment pointers removed. Shared platform README mechanism material mapped here."
+  },
+  "fixture_support.py": {
+    "original": null,
+    "source": null,
+    "projected": null,
+    "delivered": {
+      "mode": "100644",
+      "oid": "265e7872730a66b89378a3fc44c5d14013c3c56d"
+    },
+    "deleted": false,
+    "reason": "Retain isolated test fixtures without deletion; not imported by runtime."
+  },
+  "platform_paths.py": {
+    "original": null,
+    "source": {
+      "mode": "100644",
+      "oid": "fac7d40d7846eaf80865215c413071d3a7627d1a"
+    },
+    "projected": {
+      "mode": "100644",
+      "oid": "fac7d40d7846eaf80865215c413071d3a7627d1a"
+    },
+    "delivered": {
+      "mode": "100644",
+      "oid": "798b8cdc4999132d81c887db38bf1a8710b765df"
+    },
+    "deleted": false,
+    "reason": "Local helper contract v1: real source identity, nonempty expanded absolute override, default repo parent, no marker/MODULES."
+  },
+  "serviced.py": {
+    "original": {
+      "mode": "100755",
+      "oid": "a39739e040e6259a25590c766f32647c943d8818"
+    },
+    "source": {
+      "mode": "100755",
+      "oid": "6b38f8799ec302d966de0857cab07f8475d6cda8"
+    },
+    "projected": {
+      "mode": "100755",
+      "oid": "6b38f8799ec302d966de0857cab07f8475d6cda8"
+    },
+    "delivered": {
+      "mode": "100755",
+      "oid": "303d2f559861cc47a9626ee92790424a446c81bd"
+    },
+    "deleted": false,
+    "reason": "Only dependency/import bootstrap: own realpath helper and exact AGENTD_DIR envscrub loader, development sibling only, missing/invalid dependency rejection. Lifecycle/env_loader logic unchanged."
+  },
+  "sync-loop.sh": {
+    "original": {
+      "mode": "100755",
+      "oid": "630fdd7158f43db44c06f1a66a9a8a58dea8257e"
+    },
+    "source": {
+      "mode": "100755",
+      "oid": "b9db054db1146d8dba4d4a16204251c66ac28ad0"
+    },
+    "projected": {
+      "mode": "100755",
+      "oid": "b9db054db1146d8dba4d4a16204251c66ac28ad0"
+    },
+    "delivered": {
+      "mode": "100755",
+      "oid": "14f88304d50c7f1897252472838b2ca0e935d9a3"
+    },
+    "deleted": false,
+    "reason": "Only bootstrap: realpath source and local helper; second Python entry stays in this source repo, independent of workspace."
+  },
+  "test_dependency.py": {
+    "original": null,
+    "source": null,
+    "projected": null,
+    "delivered": {
+      "mode": "100644",
+      "oid": "495a65d7e9174ce69c51a4e163493474f9f989cd"
+    },
+    "deleted": false,
+    "reason": "New pinned dependency/layout/priority/negative/import/identity tests using synthetic trees."
+  },
+  "test_env_loader.py": {
+    "original": null,
+    "source": {
+      "mode": "100644",
+      "oid": "d3bf1a029ab35391932a77c6b64680db7aa1e401"
+    },
+    "projected": {
+      "mode": "100644",
+      "oid": "d3bf1a029ab35391932a77c6b64680db7aa1e401"
+    },
+    "delivered": {
+      "mode": "100644",
+      "oid": "0750fc33f22ba53c32d03f8da3b16e4a2429150e"
+    },
+    "deleted": false,
+    "reason": "Retain fixtures/explicit dependency config in subprocess; add require_env spawn refusal, literal argv/no shell/timeout and dependency-derived scrub tests."
+  },
+  "test_lifecycle.py": {
+    "original": {
+      "mode": "100644",
+      "oid": "bcb8dad8d29039adcd82559c60ace05c5add704d"
+    },
+    "source": {
+      "mode": "100644",
+      "oid": "bcb8dad8d29039adcd82559c60ace05c5add704d"
+    },
+    "projected": {
+      "mode": "100644",
+      "oid": "bcb8dad8d29039adcd82559c60ace05c5add704d"
+    },
+    "delivered": {
+      "mode": "100644",
+      "oid": "2214d2cc24bf78e52ffdf80500b673ac7e3f70cc"
+    },
+    "deleted": false,
+    "reason": "Keep lifecycle assertions; replace temporary directory auto-deletion with retained synthetic fixture."
+  },
+  "test_platform_paths.py": {
+    "original": null,
+    "source": {
+      "mode": "100644",
+      "oid": "42f1e3419ba1007398cd431ecc19d313e2bb53a5"
+    },
+    "projected": {
+      "mode": "100644",
+      "oid": "42f1e3419ba1007398cd431ecc19d313e2bb53a5"
+    },
+    "delivered": {
+      "mode": "100644",
+      "oid": "792c7fbea0e907fb34b8aeafe39ec1638f54d726"
+    },
+    "deleted": false,
+    "reason": "Adapt platform-specific MODULES/marker tests to local contract v1 and CLI/realpath/override matrix."
+  },
+  "test_registry.py": {
+    "original": {
+      "mode": "100644",
+      "oid": "950dcda54667d60ceb893b700e8f37832ecb1c44"
+    },
+    "source": {
+      "mode": "100644",
+      "oid": "950dcda54667d60ceb893b700e8f37832ecb1c44"
+    },
+    "projected": {
+      "mode": "100644",
+      "oid": "950dcda54667d60ceb893b700e8f37832ecb1c44"
+    },
+    "delivered": {
+      "mode": "100644",
+      "oid": "1bcee2e3fa94de421448e47fc932676c1a12785b"
+    },
+    "deleted": false,
+    "reason": "Keep registry assertions; no auto-deletion of fixtures."
+  },
+  "test_serviced_path.py": {
+    "original": {
+      "mode": "100644",
+      "oid": "d52598f2ceb64585ff2885ef954de3804d807bd6"
+    },
+    "source": {
+      "mode": "100644",
+      "oid": "d52598f2ceb64585ff2885ef954de3804d807bd6"
+    },
+    "projected": {
+      "mode": "100644",
+      "oid": "d52598f2ceb64585ff2885ef954de3804d807bd6"
+    },
+    "delivered": {
+      "mode": "100644",
+      "oid": "bc9763509971c9e716e36232f4fda697cde53f24"
+    },
+    "deleted": false,
+    "reason": "Keep PATH assertions; replace production cleanup-root discovery and rmtree with retained fixtures."
+  },
+  "test_shell.py": {
+    "original": null,
+    "source": null,
+    "projected": null,
+    "delivered": {
+      "mode": "100644",
+      "oid": "0c4169d1178723ae26683418dfaf28faad7ada5b"
+    },
+    "deleted": false,
+    "reason": "New actual Bash3.2 full-loop/second-entry fixture matrix with synthetic sync only."
+  }
+}
