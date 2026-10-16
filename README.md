@@ -45,4 +45,4 @@ python3 serviced/test_registry.py        # 单测：注册表 loader
   （按名引用形态 = `@ws-agents#behavior-rules`，只在工作区内可解）
 - 各被纠偏服务的常驻壳、实现体与跨机状态视图：均不在本模块（住各自服务仓与调用方工作区；本模块只从注册表读到它们的启动命令）
 - 单服务运维册与部署面事实（内网端点/主机名/凭据面路径 ⇒ 不能公开）：住调用方工作区的运维册目录（本工作区 = `ops/`，收录判据 = 其 README）
-- 模块间依赖两枚：身份洗刷名单的单点 = `agentd/envscrub.py`（与服务监督侧 runner spawn 同口径，禁两份名单漂移）；`env_file` 解密 = `encrypt/envdec.py`
+- 身份洗刷名单的单点 = `agentd/envscrub.py`（与服务监督侧 runner spawn 同口径）。环境文件转换由调用方 profile 的 `env_loader` argv 提供；平台只接收其 stdout，不导入工作区解密实现。

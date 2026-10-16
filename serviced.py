@@ -5,7 +5,7 @@ their declarations, and execute the service lifecycle.
 The registry is two layers of JSON under <workspace>/services/:
   profiles/<service>.json          how to run it: version + lifecycle fields
                                    (cmd/match/stop_match/cwd/wrapper/stop_cmd/
-                                   status/start_timeout/env_file/require_env/
+                                   status/start_timeout/env_file/env_loader/require_env/
                                    extra_env) + summary/note/notes prose.
                                    Shared by every machine that runs it.
   daemons/<host>.<service>.json    that THIS machine runs it: `hostname` (the
@@ -108,8 +108,6 @@ from platform_paths import workspace_root
 
 WS = Path(workspace_root(__file__))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agentd"))
-sys.path.insert(0, str(WS / "encrypt"))
-import envdec  # noqa: E402  env_file 解密 + KV 正则单点
 import envscrub  # noqa: E402  spawn 环境洗刷名单单点
 SERVICES_DIR = WS / "services"
 PROFILES_DIR = SERVICES_DIR / "profiles"
@@ -124,7 +122,7 @@ HOST_ID_FILE = Path(os.environ.get("SERVICED_HOST_ID")
 PROFILE_KEYS = frozenset({
     "name", "version", "summary", "note", "notes", "cmd", "match",
     "stop_match", "cwd", "wrapper", "stop_cmd", "status", "start_timeout",
-    "env_file", "require_env", "extra_env"})
+    "env_file", "env_loader", "require_env", "extra_env"})
 DAEMON_KEYS = frozenset({"hostname", "profile", "desired", "note"})
 DESIRED_STATES = ("online", "offline")
 LOGS_DIR = WS / "run" / "logs"
@@ -134,6 +132,9 @@ PIDS_DIR = WS / "run" / "pids"
 # Every wait in serviced.py is bounded by its own timeout — gather() joins its probe
 # threads without a per-future cap, so no probe may be unbounded.
 PROBE_TIMEOUT = 30
+# Caller environment converters are bounded and never execute through a shell.
+ENV_LOAD_TIMEOUT = 30
+ENV_KV_RE = re.compile(r"^(\s*(?:export\s+)?[A-Za-z_]\w*\s*=\s*)(.*)$")
 # Cap on the two `ps` scans (ps_table / pid_lstart): a hung `ps` (D state,
 # stuck procfs) yields an empty table / an empty lstart instead of stalling
 # status or stop. An empty lstart lands in pidfile_alive's trust-the-pidfile
@@ -1044,6 +1045,12 @@ def _validate_entry(svc):
     if (not isinstance(cmd, list) or not cmd
             or not all(isinstance(arg, str) and arg for arg in cmd)):
         sys.exit(f"error: service {name!r}: cmd must be a non-empty argv array")
+    if "env_loader" in svc:
+        loader = svc["env_loader"]
+        if (not isinstance(loader, list) or not loader
+                or not all(isinstance(arg, str) and arg.strip() for arg in loader)
+                or not isinstance(svc.get("env_file"), str) or not svc["env_file"].strip()):
+            sys.exit(f"error: service {name!r}: env_loader requires a non-empty argv and env_file")
     wrapper = svc.get("wrapper", "svc")
     if wrapper not in ("svc", "none"):
         sys.exit(f"error: service {name!r}: wrapper must be 'svc' or 'none', "
@@ -1099,11 +1106,11 @@ def probe_online(svc):
 
 
 def _env_kv(line):
-    """(key, value) for one decrypted env-file line, or None. envdec.KV_RE is
-    the single regex (it takes the `export ` prefix and spaces around `=`);
+    """(key, value) for one rendered env-file line, or None. The service
+    grammar accepts the `export ` prefix and spaces around `=`;
     quotes are stripped only as a matching pair (same kind on both ends) — an
     unpaired leading or trailing quote is legitimate value content."""
-    m = envdec.KV_RE.match(line)
+    m = ENV_KV_RE.match(line)
     if not m:
         return None
     head = m.group(1).strip()          # 'export KEY =' | 'KEY ='
@@ -1118,7 +1125,7 @@ def _env_kv(line):
 
 def build_env(svc):
     """Spawn environment: scrubbed identity (clean_env), then the data-driven
-    env hooks — env_file decryption (encrypt/envdec.py KEY=VALUE lines),
+    env hooks — env_file loading through a caller-provided argv,
     extra_env (~ expanded), finally the require_env gate: refuse to start
     when a required variable is missing (a service must never come up
     without its credentials)."""
@@ -1128,7 +1135,15 @@ def build_env(svc):
         # An unreadable or undecryptable file contributes no variables, so the
         # require_env gate below is what refuses the start.
         try:
-            text = envdec.decrypt_text((WS / env_file).read_text())
+            source = (WS / os.path.expanduser(env_file)).absolute()
+            loader = svc.get("env_loader")
+            if loader:
+                text = subprocess.run(_expand(loader) + [str(source)], cwd=str(WS),
+                                      env=env, capture_output=True, text=True,
+                                      encoding="utf-8", timeout=ENV_LOAD_TIMEOUT,
+                                      check=True).stdout
+            else:
+                text = source.read_text(encoding="utf-8")
         except Exception:
             text = ""
         for k, v in filter(None, map(_env_kv, text.splitlines())):
@@ -1137,7 +1152,7 @@ def build_env(svc):
         env[str(k)] = os.path.expanduser(str(v))
     missing = [k for k in (svc.get("require_env") or []) if not env.get(k)]
     if missing:
-        hint = (f"decrypt {env_file} via encrypt/envdec.py or export it"
+        hint = (f"load {env_file} via env_loader or export it"
                 if env_file else "export it")
         sys.exit(f"ERROR: {', '.join(missing)} not set ({hint}); refusing "
                  f"to start {svc['name']}")
