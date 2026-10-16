@@ -45,7 +45,7 @@ set -m  # job control：后台子进程自成进程组（正确性要求，缘�
 
 MODULE_DIR="$(cd "$(dirname "$0")" && pwd -P)" || exit 1
 WS="$(python3 "${MODULE_DIR}/../platform_paths.py" "$0")" || exit 1
-SYNC="$WS/serviced/serviced.py"
+SYNC="${MODULE_DIR}/serviced.py"
 QUIET_LINE="no drift, nothing to do"
 
 _posint() {  # 非法值回退缺省：一个坏值不能让 sleep 立刻返回 ⇒ 变成 sync 热循环
