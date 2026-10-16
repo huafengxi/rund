@@ -103,8 +103,11 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-WS = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(WS / "agentd"))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+from platform_paths import workspace_root
+
+WS = Path(workspace_root(__file__))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agentd"))
 sys.path.insert(0, str(WS / "encrypt"))
 import envdec  # noqa: E402  env_file 解密 + KV 正则单点
 import envscrub  # noqa: E402  spawn 环境洗刷名单单点

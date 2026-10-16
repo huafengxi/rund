@@ -43,7 +43,8 @@
 set -u
 set -m  # job control：后台子进程自成进程组（正确性要求，缘由见头注）
 
-WS="$(cd "$(dirname "$0")/.." && pwd)"
+MODULE_DIR="$(cd "$(dirname "$0")" && pwd -P)" || exit 1
+WS="$(python3 "${MODULE_DIR}/../platform_paths.py" "$0")" || exit 1
 SYNC="$WS/serviced/serviced.py"
 QUIET_LINE="no drift, nothing to do"
 
