@@ -288,21 +288,143 @@ p.prepare(json.loads(Path(sys.argv[1]).read_text()),sys.argv[2])
         self.assertTrue(partials <= set((self.node / 'state/staging').iterdir()))
 
     def test_two_process_concurrency(self):
-        init_root(self.node)
         decl = self.area / 'concurrent.json'; decl.write_text(json.dumps(self.task))
-        cmd = [sys.executable, '-B', '-m', 'runtime.cli', 'prepare', '--root', str(self.node), '--declaration', str(decl)]
-        ps = [subprocess.Popen(cmd, env=ENV, cwd=BASE / 'cwd unrelated', stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
+        for initialized in (False, True):
+            root = self.node / str(initialized)
+            if initialized:
+                init_root(root)
+            cmd = [sys.executable, '-B', '-m', 'runtime.cli', 'prepare', '--root', str(root), '--declaration', str(decl)]
+            ps = [subprocess.Popen(cmd, env=ENV, cwd=BASE / 'cwd unrelated', stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(2)]
+            results = []
+            for p in ps:
+                out, err = p.communicate(timeout=60)
+                with EVENTS.open('a') as f:
+                    f.write(json.dumps({'command': cmd, 'environment': ENV, 'cwd': str(BASE / 'cwd unrelated'), 'rc': p.returncode, 'stdout': out, 'stderr': err, 'concurrentPid': p.pid}) + '\n')
+                self.assertEqual(p.returncode, 0, err)
+                results.append(json.loads(out))
+            self.assertEqual(results[0]['code'], results[1]['code'])
+            self.assertEqual(sorted(r['cacheHit'] for r in results), [False, True])
+            self.assertEqual(len(list((root / 'manifests').glob('*.json'))), 1)
+            self.assertEqual(len(list((root / 'code').iterdir())), 1)
+            self.assertTrue(self.cli(root=root)['cacheHit'])
+
+    def test_first_initialization_marker_interleave(self):
+        # Pause only this test's child after O_EXCL marker creation, before any
+        # write. A second child must reach the SAME locked inode and block.
+        ready = self.area / 'marker-created'
+        waiting = self.area / 'second-blocked'
+        release = self.area / 'release-marker-write'
+        decl = self.area / 'interleave.json'; decl.write_text(json.dumps(self.task))
+        first = '''import sys,time
+from pathlib import Path
+import runtime.prepare as p
+from runtime.cli import main
+original=p.os.open
+def paused(path,*args,**kwargs):
+ fd=original(path,*args,**kwargs)
+ if Path(path).name=='.rund-root.json':
+  Path(sys.argv[3]).write_text('O_EXCL created marker; no bytes written')
+  while not Path(sys.argv[4]).exists():time.sleep(.01)
+ return fd
+p.os.open=paused
+sys.exit(main(['prepare','--declaration',sys.argv[1],'--root',sys.argv[2]]))
+'''
+        second = '''import os,sys
+from pathlib import Path
+import runtime.prepare as p
+from runtime.cli import main
+original=p.fcntl.flock
+def observed(fd,operation):
+ st=os.fstat(fd); target=(Path(sys.argv[2])/'.init.lock').stat()
+ if (st.st_dev,st.st_ino)==(target.st_dev,target.st_ino):
+  try: original(fd,operation|p.fcntl.LOCK_NB)
+  except BlockingIOError:
+   Path(sys.argv[3]).write_text('same init lock inode is held by first child')
+   return original(fd,operation)
+  raise AssertionError('second initializer failed to wait for first')
+ return original(fd,operation)
+p.fcntl.flock=observed
+sys.exit(main(['prepare','--declaration',sys.argv[1],'--root',sys.argv[2]]))
+'''
+        commands = [[sys.executable, '-B', '-c', first, str(decl), str(self.node), str(ready), str(release)],
+                    [sys.executable, '-B', '-c', second, str(decl), str(self.node), str(waiting)]]
+        children = []
         results = []
-        for p in ps:
-            out, err = p.communicate(timeout=60)
-            with EVENTS.open('a') as f:
-                f.write(json.dumps({'command': cmd, 'environment': ENV, 'cwd': str(BASE / 'cwd unrelated'), 'rc': p.returncode, 'stdout': out, 'stderr': err, 'concurrentPid': p.pid}) + '\n')
-            self.assertEqual(p.returncode, 0, err)
-            results.append(json.loads(out))
-        self.assertEqual(results[0]['code'], results[1]['code'])
-        self.assertEqual(sorted(r['cacheHit'] for r in results), [False, True])
-        self.assertEqual(len(list((self.node / 'manifests').glob('*.json'))), 1)
-        self.assertEqual(len(list((self.node / 'code').iterdir())), 1)
+        try:
+            for cmd, event in zip(commands, (ready, waiting)):
+                proc = subprocess.Popen(cmd, env=ENV, cwd=BASE / 'cwd unrelated', stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                children.append(proc)
+                deadline = time.monotonic() + 30
+                while not event.exists() and proc.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.01)
+                if not event.exists():
+                    self.fail('child did not reach scheduling barrier: ' + str(cmd))
+            self.assertEqual((self.node / '.rund-root.json').read_bytes(), b'')
+            self.assertIsNone(children[0].poll())
+            self.assertIsNone(children[1].poll())
+            release.touch()
+            for proc, cmd in zip(children, commands):
+                out, err = proc.communicate(timeout=60)
+                result = {'command': cmd, 'environment': ENV, 'cwd': str(BASE / 'cwd unrelated'),
+                          'rc': proc.returncode, 'stdout': out, 'stderr': err, 'pid': proc.pid}
+                results.append(result)
+                with EVENTS.open('a') as f:
+                    f.write(json.dumps(result) + '\n')
+            self.assertEqual([r['rc'] for r in results], [0, 0], results)
+            prepared = [json.loads(r['stdout']) for r in results]
+            self.assertEqual(sorted(r['cacheHit'] for r in prepared), [False, True])
+            self.assertEqual(prepared[0]['code'], prepared[1]['code'])
+            self.assertEqual(prepared[0]['manifest'], prepared[1]['manifest'])
+            manifest = json.loads(Path(prepared[0]['manifest']).read_text())
+            self.assertTrue(manifest['complete'])
+            self.assertEqual(manifest['inputs']['declaration'], self.task)
+            self.assertEqual(len(list((self.node / 'manifests').glob('*.json'))), 1)
+            self.assertTrue(self.cli()['cacheHit'])
+        finally:
+            release.touch()
+            for proc, cmd in zip(children, commands):
+                if proc.poll() is None:
+                    proc.kill()
+                if proc.stdout is not None and not proc.stdout.closed:
+                    out, err = proc.communicate(timeout=10)
+                    results.append({'command': cmd, 'rc': proc.returncode, 'stdout': out, 'stderr': err, 'cleanup': True})
+            (self.area / 'interleave-results.json').write_text(json.dumps(results, indent=2))
+
+    def test_nonobject_final_manifest_refused(self):
+        r = self.cli()
+        manifest = Path(r['manifest']); original = manifest.read_bytes()
+        for value in (None, [], [1], 'text', 0, 1.5, True, False):
+            with self.subTest(value=value):
+                bad = json.dumps(value).encode()
+                manifest.write_bytes(bad)
+                p = self.cli(good=False)
+                self.assertIn('manifest must be a JSON object', p.stderr)
+                self.assertEqual(p.stdout, '')
+                self.assertEqual(manifest.read_bytes(), bad)
+                self.assertEqual(len(list((self.node / 'manifests').glob('*.json'))), 1)
+        manifest.write_bytes(original)
+        self.assertTrue(self.cli()['cacheHit'])
+
+    def test_root_marker_rejections(self):
+        for index, bad in enumerate((b'', b'{broken', b'null', b'{"format":"not-our-root"}')):
+            root = self.area / ('bad-marker-' + str(index)); root.mkdir()
+            marker = root / '.rund-root.json'; marker.write_bytes(bad)
+            self.cli(root=root, good=False)
+            self.assertEqual(marker.read_bytes(), bad)
+            self.assertFalse((root / 'cache').exists())
+        bait = self.area / 'marker-bait'; bait.write_text('untouched')
+        for name in ('symlink', 'hardlink', 'directory'):
+            root = self.area / name; root.mkdir()
+            marker = root / '.rund-root.json'
+            if name == 'symlink':
+                marker.symlink_to(bait)
+            elif name == 'hardlink':
+                os.link(bait, marker)
+            else:
+                marker.mkdir()
+            self.cli(root=root, good=False)
+            self.assertFalse((root / 'cache').exists())
+        self.assertEqual(bait.read_text(), 'untouched')
 
     def test_half_manifest_refused(self):
         r = self.cli()

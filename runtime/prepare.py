@@ -98,10 +98,10 @@ def init_root(root):
         require(root.is_dir(), 'root must be directory')
         entries = set(p.name for p in root.iterdir())
         require(not entries or '.rund-root.json' in entries or entries == {'.init.lock'}, 'refusing nonempty unmanaged root')
-        if '.rund-root.json' in entries:
-            require(read_regular(root / '.rund-root.json') == canonical({'format': FORMAT}), 'unrecognized node root')
     directory(root)
     with lock(root / '.init.lock'):
+        # A cooperating initializer may have created the marker but not written
+        # it yet. Inspect its contents only under this stable initialization lock.
         marker = root / '.rund-root.json'
         if marker.exists() or marker.is_symlink():
             require(read_regular(marker) == canonical({'format': FORMAT}), 'unrecognized node root')
@@ -315,6 +315,7 @@ def prepare(declaration, root):
         with lock(root / 'state/locks' / ('prepare-' + key + '.lock')):
             if manifest_path.exists() or manifest_path.is_symlink():
                 manifest = json.loads(read_regular(manifest_path))
+                require(type(manifest) is dict, 'manifest must be a JSON object (retained)')
                 require(manifest.get('format') == FORMAT and manifest.get('complete') is True and manifest.get('key') == key and manifest.get('inputs') == inputs and manifest.get('files') == inventories, 'incomplete or mismatched manifest (retained)')
                 code_name = manifest.get('codeDirectory', '')
                 require(type(code_name) is str and len(code_name) == 97 and code_name[:64] == key and code_name[64] == '-' and all(c in '0123456789abcdef' for c in code_name[65:]), 'unsafe code directory in manifest')
