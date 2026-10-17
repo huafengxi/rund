@@ -1,1 +1,1 @@
-"""Opt-in experimental preparation only. Not imported by serviced."""
+"""Opt-in experimental prepare/Linux lifecycle. Not imported by legacy serviced."""

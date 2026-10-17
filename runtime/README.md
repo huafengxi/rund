@@ -1,11 +1,13 @@
-# rund preparation experiment — opt-in, not a runtime
+# rund preparation + Linux lifecycle experiment — opt-in, not production
 
 This directory is a **non-stable sandbox contract**, `rund/v1alpha1`.
 Nothing imports it from `serviced.py` or `sync-loop.sh`. It does not change the
-legacy registry or its fixed agentd dependency. It starts no payload, daemon,
-reconciler, Service/Task supervisor or adapter. No deployment or production
-activation is implied. Invoke explicitly with Python 3 on POSIX (`flock` and
-`O_NOFOLLOW` are required); this first implementation is tested on Linux only.
+legacy registry or its fixed agentd dependency. `validate`/`prepare` never start
+payloads. P2b adds explicitly called **Linux foreground synthetic** execution;
+see [LIFECYCLE.md](LIFECYCLE.md) for its separate restricted contract and CLI.
+There is no daemon, automatic reconcile, adapter, deployment or production
+activation. Invoke explicitly with Python 3 on POSIX (`flock` and
+`O_NOFOLLOW` are required); testing is Linux only.
 No third-party Python packages, agentd checkout or complete workspace is needed
 for preparation.
 
@@ -23,7 +25,7 @@ declaration; it does not verify objects, tools or filesystem permissions.
 Both commands emit JSON on success; malformed/unsupported inputs, tool/Git/IO
 failures emit `rund prepare error` to stderr and exit 2. Argument-parser errors
 also exit 2. Successful prepare emits key/cacheHit/manifest/code/work paths,
-not a run result or lifecycle success. There is no execute command.
+not a run result or lifecycle success. The separate `execute` command is opt-in.
 
 ## Frozen experimental JSON subset
 
@@ -76,9 +78,9 @@ Rules:
 - Service accepts desired `online|offline`, policy `manual|on-failure|always`,
   numeric backoff `0 <= initialSeconds <= maxSeconds <= 86400`. Task has its
   **own required attempt/request identity and rejects Service restart fields**.
-  Neither kind implements lifecycle transitions, deduplication of release
-  requests, retry, cancellation, supervision or outcomes. A prepare-key is not
-  a Task execution/attempt ledger.
+  These are schema/prepare capabilities, not proof of lifecycle support:
+  execution rejects `always`; only `manual`/`on-failure` are implemented.
+  A prepare-key is not a Task execution/attempt ledger.
 - 1..64 sources. Aliases must be unique even under case folding. `requires`
   contains exact source aliases, without duplicates, self-dependencies or
   cycles. This is not scheduler resources/needs. With empty preparation there
@@ -108,7 +110,7 @@ Rules:
 - `argv` is a nonempty list of nonempty NUL-free strings. `cwd` must be exactly
   `${work}`. Env is string values keyed by shell-style identifiers. Recognized
   `${...}` placeholders are only `${work}` and `${code.<known alias>}`. They
-  are validated but **not expanded or executed** in this module. Other plain
+  are validated but **not expanded or executed by prepare**. Other plain
   strings (including shell-looking arguments) remain inert data. Env values
   are declarations, not inherited credentials or environment loading.
 
@@ -129,7 +131,7 @@ root/
   cache/<repository-key>/          node-private bare object cache, no source config
   code/<prepare-key>-<unique>/     validated read-only source snapshot(s)
   manifests/<prepare-key>.json     local complete preparation record
-  work/                           separate writable payload workspace (no execution)
+  work/                           separate writable payload workspace
   state/
     locks/                        per-repository and per-prepare-key flock files
     staging/<unique>/             private pre-publication / retained interrupted data
@@ -224,12 +226,13 @@ the repository root and use their existing agentd/Bash3.2 input contracts.
 No legacy test, source, recovery mapping, dependency pin, service profile,
 Makefile/caller or startup path is changed by this experiment.
 
-## Explicit next boundary
+## Explicit execution and next boundary
 
-This prepares declarations and file-only Git sources, **not runtime execution**.
+P2a preparation remains unchanged. P2b's [Linux lifecycle contract](LIFECYCLE.md)
+is an additional, explicitly invoked experiment, not a production runtime.
 SSH/HTTPS, credentials, package preparation, nonempty steps, LFS/submodules,
-Service/Task lifecycle, release/retry/cancel, agent adapter, deployment, production
-activation and automatic migration guards all require separate bounded work and
-applicable approval/review. A successful prepare or test exit 0 is not an agent
+Task automatic retry, daemon/reconcile, arbitrary/daemonized payloads, agent
+adapter, deployment, production activation and automatic migration guards are
+not provided. A successful prepare, process exit 0 or test exit 0 is not an agent
 report/provider result, independent review PASS or permission to proceed through
 an execution DAG.
