@@ -513,9 +513,6 @@ class LifecycleTests(unittest.TestCase):
             offline=copy.deepcopy(new); offline['metadata']['version']=3; offline['spec']['desired']='offline'
             s=r.submit_service(offline,'version-offline'); self.assertEqual(s['phase'],'stopped')
             self.assertEqual(r.tick_service('demo')['generation'],2)
-            always=self.declaration('Service',policy='always',id='always')
-            with self.assertRaisesRegex(ValueError,'always'): r.submit_service(always,'unsupported')
-            self.assertFalse((self.root/'work/Service/always').exists())
             self.evidence.append({'oldResult':old,'offline':s})
 
     def test_20_service_leader_child_blocks_then_converges(self):
@@ -642,6 +639,292 @@ class LifecycleTests(unittest.TestCase):
             self.assertTrue(same_identity(proc(run['pid']),run))
             self.evidence.append({'refusedResult':blocked,'actual':proc(run['pid'])})
             self.assertEqual(r.control(self.ctl(request='retry-with-identity'))['phase'],'canceled')
+
+    def service_exit(self, r, s, clock=1000):
+        run = r._service_current(s)
+        work = self.ready(run)
+        (work/'release').touch()
+        wait_for(lambda: (p := proc(run['pid'])) is None or p['state'] == 'Z')
+        with patch('runtime.lifecycle.time.time', return_value=clock):
+            return r.tick_service(s['id'])
+
+    def test_28_always_real_exit_zero_and_nonzero_multigen_backoff(self):
+        with self.runtime() as r:
+            for code in (0, 7):
+                id = 'exit-' + str(code)
+                d = self.declaration('Service', code=code, policy='always', id=id)
+                s = r.submit_service(d, id)
+                old_results = {}
+                for gen, delay in ((1, .1), (2, .2), (3, .2), (4, .2)):
+                    self.assertEqual(s['generation'], gen)
+                    s = self.service_exit(r, s)
+                    self.assertEqual((s['phase'], s['backoffSeconds'], s['failures']), ('backoff', delay, gen))
+                    run = r._service_current(s)
+                    self.assertEqual((run['phase'], run['exitCode'], run['waitObserved']), ('exited', code, True))
+                    self.assertFalse(run['observation']['leaseBusy'])
+                    result = r.kernel.run_dir(run)/'result.json'
+                    old_results[result] = (result.read_bytes(), result.stat().st_ino)
+                    snapshot = copy.deepcopy(s)
+                    for _ in range(3):
+                        with patch('runtime.lifecycle.time.time', return_value=s['nextStartAt']-.001):
+                            self.assertEqual(r.tick_service(id), snapshot)
+                        self.assertEqual(r.submit_service(d, id), snapshot)
+                        self.assertEqual(r.submit_service(d, id+'-duplicate'), snapshot)
+                    self.evidence.append({'backoff': snapshot, 'terminal': run})
+                    if gen < 4:
+                        with patch('runtime.lifecycle.time.time', return_value=s['nextStartAt']):
+                            s = r.tick_service(id)
+                            # The successor is a real blocked foreground process.
+                            for _ in range(3):
+                                self.assertEqual(r.tick_service(id)['generation'], gen+1)
+                        self.ready(r._service_current(s))
+                    for path, value in old_results.items():
+                        self.assertEqual((path.read_bytes(), path.stat().st_ino), value)
+                stopped = r.control(self.ctl('Service', 'stop', id=id, gen=4, request=id+'-stop'))
+                self.assertTrue(stopped['hold'])
+                with patch('runtime.lifecycle.time.time', return_value=10000):
+                    for _ in range(3): self.assertEqual(r.tick_service(id)['generation'], 4)
+
+    def test_29_policy_matrix_same_real_exit_inputs(self):
+        with self.runtime() as r:
+            for policy in ('manual', 'on-failure', 'always'):
+                for code in (0, 7):
+                    id = policy+'-'+str(code)
+                    d = self.declaration('Service', code=code, policy=policy, id=id)
+                    s = self.service_exit(r, r.submit_service(d, id))
+                    retry = policy == 'always' or (policy == 'on-failure' and code != 0)
+                    self.assertEqual(s['phase'], 'backoff' if retry else 'exited')
+                    with patch('runtime.lifecycle.time.time', return_value=2000):
+                        for _ in range(3):
+                            s = r.tick_service(id)
+                            self.assertEqual(s['generation'], 2 if retry else 1)
+                    if retry: self.ready(r._service_current(s))
+                    self.evidence.append({'policy': policy, 'exitCode': code, 'service': s})
+                    r.control(self.ctl('Service', 'stop', id=id, gen=s['generation'], request=id+'-stop'))
+
+    def test_30_always_stop_restart_duplicate_late_generation_and_hold(self):
+        with self.runtime() as r:
+            d = self.declaration('Service', mode='hold', policy='always')
+            s = r.submit_service(d, 'initial'); self.ready(r._service_current(s))
+            stop = self.ctl('Service', 'stop', request='stop')
+            s = r.control(stop); self.assertEqual(s['phase'], 'stopped')
+            self.assertEqual(r.control(stop), s)
+            self.assertEqual(r.control(self.ctl('Service', 'stop', request='stop-again')), s)
+            for _ in range(3): self.assertEqual(r.tick_service('demo'), s)
+            self.assertEqual(r.submit_service(d, 'initial'), s)
+            self.assertEqual(r.submit_service(d, 'same-online-not-reactivation'), s)
+            restart = self.ctl('Service', 'restart', request='restart')
+            s = r.control(restart); self.assertEqual(s['generation'], 2)
+            run = r._service_current(s); self.ready(run)
+            self.assertEqual(r.control(restart)['generation'], 2)
+            for action in ('stop', 'restart'):
+                self.assertTrue(r.control(self.ctl('Service', action, request='late-'+action))['noop'])
+                self.assertTrue(same_identity(proc(run['pid']), run))
+            r.control(self.ctl('Service', 'stop', request='stop-new', gen=2))
+            # Hold persists across owner closure, not merely in-memory flags.
+        with self.runtime() as r:
+            for _ in range(3):
+                s = r.tick_service('demo'); self.assertEqual((s['generation'], s['hold']), (2, True))
+            self.evidence.append({'heldAfterOwnerReopen': s})
+
+    def test_31_always_offline_during_backoff_and_explicit_new_online(self):
+        with self.runtime() as r:
+            d = self.declaration('Service', policy='always')
+            s = self.service_exit(r, r.submit_service(d, 'initial'))
+            result = r.kernel.run_dir(r._service_current(s))/'result.json'; before = result.read_bytes()
+            off = copy.deepcopy(d); off['metadata']['version'] = 2; off['spec']['desired'] = 'offline'
+            s = r.submit_service(off, 'offline'); self.assertEqual((s['phase'], s['hold'], s['nextStartAt']), ('stopped', True, None))
+            with patch('runtime.lifecycle.time.time', return_value=10000):
+                for _ in range(3): self.assertEqual(r.tick_service('demo')['generation'], 1)
+            with self.assertRaisesRegex(ValueError, 'offline'):
+                r.control(self.ctl('Service', 'restart', request='offline-restart'))
+            self.assertEqual(r.control(self.ctl('Service', 'restart', request='offline-restart'))['status'], 'pending')
+            with self.assertRaisesRegex(ValueError, 'newer version'): r.submit_service(d, 'old-online')
+            on = copy.deepcopy(d); on['metadata']['version'] = 3
+            s = r.submit_service(on, 'new-online'); self.assertEqual(s['generation'], 2); self.ready(r._service_current(s))
+            self.assertEqual(r.submit_service(on, 'new-online')['generation'], 2)
+            self.assertEqual(result.read_bytes(), before)
+            r.control(self.ctl('Service', 'stop', request='stop-new', gen=2))
+            self.evidence.append({'reactivated': s, 'offline': off})
+
+    def with_always(self, case):
+        # Reuse the exact original fault assertions, but retain the new policy
+        # in declarations/run/result evidence. No kernel/fault gate is mocked away.
+        original = self.declaration
+        def declaration(*args, **kwargs):
+            d = original(*args, **kwargs)
+            if d['kind'] == 'Service': d['spec']['restart']['policy'] = 'always'
+            return d
+        with patch.object(self, 'declaration', side_effect=declaration): case()
+
+    def test_32_always_running_version_prepare_first_offline(self):
+        self.with_always(self.test_19_service_version_prepare_first_offline_boundary)
+
+    def test_33_always_leader_child_lease_blocks_even_restart(self):
+        self.with_always(self.test_20_service_leader_child_blocks_then_converges)
+
+    def test_34_always_recorded_orphan_no_wait_converges_then_backoff(self):
+        self.with_always(self.test_21_service_orphan_lost_only_restarts_after_convergence)
+
+    def test_35_always_spawned_unrecorded_blocks_even_after_lease_free(self):
+        self.with_always(self.test_22_service_starting_identity_unavailable_stays_blocked)
+
+    def test_36_always_starting_before_spawn_without_identity_blocks(self):
+        d = self.declaration('Service', mode='hold', policy='always')
+        self.crash_driver(d, 'starting')
+        with self.runtime() as r:
+            for _ in range(3):
+                s = r.tick_service('demo')
+                self.assertEqual((s['phase'], s['generation']), ('cleanupUnknown', 1))
+            run = r._service_current(s)
+            self.assertIsNone(run['pid']); self.assertFalse(r.kernel.lease_busy(run))
+            self.assertFalse(list(self.root.glob('work/*/*/*/*/ready')))
+            self.evidence.append({'startingNoIdentity': s, 'run': run})
+
+    def test_37_always_identity_mismatch_and_unavailable_no_signal(self):
+        with self.runtime() as r:
+            d = self.declaration('Service', mode='hold', policy='always')
+            s = r.submit_service(d, 'initial'); run = r._service_current(s); self.ready(run)
+            original = copy.deepcopy(run)
+            run['procStart'] += 1; r.kernel.save(run)
+            for _ in range(3):
+                s = r.tick_service('demo'); self.assertEqual((s['phase'], s['generation']), ('cleanupUnknown', 1))
+            s = r.control(self.ctl('Service', 'restart', request='mismatch'))
+            blocked = r._service_current(s)
+            self.assertEqual(s['phase'], 'cleanupUnknown')
+            self.assertFalse(any(e['event']=='signal' for e in blocked['stopEvidence']))
+            self.assertTrue(same_identity(proc(original['pid']), original))
+            self.evidence.append({'mismatch': blocked})
+            r.kernel.save(original)
+            with patch('runtime.kernel.proc', side_effect=PermissionError('832kxv unavailable fixture')):
+                s = r.tick_service('demo'); self.assertEqual(s['phase'], 'cleanupUnknown')
+                s = r.control(self.ctl('Service', 'restart', request='unavailable'))
+            blocked = r._service_current(s)
+            self.assertEqual((s['phase'], s['generation']), ('cleanupUnknown', 1))
+            self.assertFalse(any(e['event']=='signal' for e in blocked['stopEvidence']))
+            self.assertTrue(same_identity(proc(original['pid']), original))
+            self.evidence.append({'unavailable': blocked})
+            self.assertEqual(r.control(self.ctl('Service', 'stop', request='known-stop'))['phase'], 'stopped')
+
+    def test_38_always_pending_requests_never_replay_effects(self):
+        with self.runtime() as r:
+            d = self.declaration('Service', mode='hold', policy='always')
+            s = r.submit_service(d, 'initial'); run = r._service_current(s); self.ready(run)
+            # Fault fixture: durable pending receipt, no completed effect/receipt.
+            restart = self.ctl('Service', 'restart', request='pending-restart')
+            r.request('pending-restart', {'operation': 'control', 'control': restart})
+            new = copy.deepcopy(d); new['metadata']['version'] = 2
+            r.request('pending-version', {'operation': 'service', 'declaration': new})
+            for _ in range(3):
+                self.assertEqual(r.control(restart)['status'], 'pending')
+                unknown = r.submit_service(new, 'pending-version')
+                self.assertEqual(unknown['reason'], 'request-outcome-unknown-no-replay')
+                self.assertEqual(r.tick_service('demo')['generation'], 1)
+                self.assertTrue(same_identity(proc(run['pid']), run))
+            self.evidence.append({'pendingControl': r.control(restart), 'pendingVersion': unknown})
+            r.control(self.ctl('Service', 'stop', request='stop'))
+
+    def test_39_always_prepare_and_start_failure_do_not_auto_repair(self):
+        with self.runtime() as r:
+            d = self.declaration('Service', policy='always', id='bad-prepare')
+            d['spec']['sources'][0]['revision'] = 'f'*40
+            failed = r.submit_service(d, 'bad-prepare')
+            self.assertEqual(failed['phase'], 'failed')
+            self.assertFalse((r.object_dir('Service', 'bad-prepare')/'service.json').exists())
+            for _ in range(3):
+                # Existing no-head duplicate contract returns the completed
+                # request receipt, not just its nested result. No prepare replay.
+                with patch('runtime.lifecycle.prepare', side_effect=AssertionError('duplicate prepare replay')):
+                    receipt = r.submit_service(d, 'bad-prepare')
+                self.assertEqual((receipt['status'], receipt['result']), ('done', failed))
+            d = self.declaration('Service', policy='always')
+            d['spec']['argv'][0] = 'no-executable-832kxv'
+            s = r.submit_service(d, 'bad-start')
+            run = r._service_current(s)
+            self.assertEqual((s['phase'], s['generation']), ('failed', 1)); self.assertIsNone(run['pid'])
+            result = r.kernel.run_dir(run)/'result.json'; before = result.read_bytes()
+            with patch('runtime.lifecycle.time.time', return_value=10000):
+                for _ in range(3): self.assertEqual(r.tick_service('demo'), s)
+            self.assertEqual(result.read_bytes(), before)
+            self.assertFalse(list(self.root.glob('work/*/*/*/*/ready')))
+            self.evidence.append({'prepareFailure': failed, 'startFailure': s, 'run': run})
+
+    def test_40_always_result_before_policy_snapshot_reconciles_once(self):
+        with self.runtime() as r:
+            d = self.declaration('Service', policy='always')
+            s = r.submit_service(d, 'initial'); run = r._service_current(s); work = self.ready(run)
+            (work/'release').touch()
+            wait_for(lambda: (p := proc(run['pid'])) is None or p['state']=='Z')
+            fact = r.kernel.observe(run); self.assertEqual(fact['status'], 'exited')
+            r.kernel.finish(run, 'exited', fact['reason'], fact)
+            result = r.kernel.run_dir(run)/'result.json'; before = result.read_bytes()
+            # Reopen at the real terminal commit / stale Service-head boundary.
+        with self.runtime() as r:
+            with patch('runtime.lifecycle.time.time', return_value=1000):
+                s = r.tick_service('demo'); self.assertEqual((s['phase'], s['failures']), ('backoff', 1))
+                for _ in range(3): self.assertEqual(r.tick_service('demo'), s)
+            self.assertEqual(result.read_bytes(), before)
+            self.evidence.append({'recoveredPolicy': s})
+            r.control(self.ctl('Service', 'stop', request='stop'))
+
+    def test_41_task_success_still_absorbs_without_auto_retry(self):
+        with self.runtime() as r:
+            d = self.declaration(); run = r.accept_task(d); work = self.ready(run); (work/'release').touch()
+            done = r.wait_task('demo', 'a1')
+            self.assertEqual(done['phase'], 'succeeded')
+            result = r.kernel.run_dir(done)/'result.json'; before = result.read_bytes()
+            for _ in range(3):
+                self.assertEqual(r.observe_task('demo', 'a1'), done)
+                self.assertEqual(r.start_task('demo', 'a1'), done)
+                self.assertEqual(r.accept_task(d), done)
+            self.assertEqual(result.read_bytes(), before)
+            self.evidence.append({'absorbingTaskSuccess': done})
+
+    def test_42_always_exit_zero_leader_wait_does_not_bypass_child_lease(self):
+        with self.runtime() as r:
+            d = self.declaration('Service', mode='leader-exit', policy='always')
+            s = r.submit_service(d, 'initial'); run = r._service_current(s); work = self.ready(run)
+            child = read_json(work/'child-ready')
+            (work/'exit-leader').touch()
+            wait_for(lambda: (p := proc(run['pid'])) is None or p['state']=='Z')
+            for _ in range(3):
+                s = r.tick_service('demo'); self.assertEqual((s['phase'], s['generation']), ('cleanupUnknown', 1))
+                self.assertIsNone(s['nextStartAt'])
+            observation = r._service_current(s)['observation']
+            self.assertEqual((observation['exitCode'], observation['waitObserved'], observation['leaseBusy']), (0, True, True))
+            self.assertTrue(same_identity(proc(child['pid']), child))
+            self.evidence.append({'blockedByChildDespiteRealExitZero': s, 'observation': observation})
+            self.independent_kill(child)
+            with patch('runtime.lifecycle.time.time', return_value=1000):
+                s = r.tick_service('demo'); self.assertEqual((s['phase'], s['backoffSeconds']), ('backoff', .1))
+            self.assertFalse(r._service_current(s)['observation']['leaseBusy'])
+            with patch('runtime.lifecycle.time.time', return_value=s['nextStartAt']):
+                s = r.tick_service('demo'); self.assertEqual(s['generation'], 2)
+            self.ready(r._service_current(s))
+            # Stop still cannot KILL a leaderless group; independently kill the
+            # known child only if needed (ordinary running fixture is stoppable
+            # here after both receive TERM? leader-exit ignores TERM, so KILL).
+            stopped = r.control(self.ctl('Service', 'stop', request='stop-new', gen=2), term_seconds=.05)
+            self.assertEqual(stopped['phase'], 'stopped')
+            final = r._service_current(stopped)
+            self.assertEqual([e['signal'] for e in final['stopEvidence'] if e['event']=='signal'], [15, 9])
+            self.assertFalse(final['stopEvidence'][-1]['leaseBusy'])
+            self.evidence.append({'newGenerationStopped': stopped, 'result': final})
+
+    def test_43_always_unindexed_generation_blocks_all_tick_allocation(self):
+        with self.runtime() as r:
+            d = self.declaration('Service', mode='hold', policy='always')
+            s = r.submit_service(d, 'initial'); run = r._service_current(s); self.ready(run)
+            # Existing crash boundary: allocated run not yet published as head.
+            pending = r.new_run(d, 'service', 2)
+            for _ in range(3):
+                s = r.tick_service('demo'); self.assertEqual((s['phase'], s['generation']), ('cleanupUnknown', 1))
+                self.assertEqual(s['reason'], 'unindexed-generation-requires-manual-inspection')
+                self.assertTrue(same_identity(proc(run['pid']), run))
+            self.assertEqual(len(list((self.root/'state/runs/Service/demo/service').iterdir())), 2)
+            self.assertIsNone(pending['pid'])
+            self.evidence.append({'unindexedBlocked': s, 'pendingRun': pending})
+            r.control(self.ctl('Service', 'stop', request='stop'))
 
 
 if __name__ == '__main__':

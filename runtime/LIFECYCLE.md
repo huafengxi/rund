@@ -1,4 +1,4 @@
-# P2b: explicit Linux foreground lifecycle sandbox (task 68wblg)
+# Explicit Linux foreground lifecycle sandbox (P2b 68wblg; Service always 832kxv)
 
 **Experimental, unstable API; not a production runtime/P3 or deployment PASS.**
 Based on nf2q61/design §4–7, following P2a prepare. Nothing imports this from
@@ -97,22 +97,40 @@ not every identical running poll. Each observation includes its actual time.
 
 ### Service
 
-Declaration identity persists independently of each run. `manual` and
-`on-failure` are supported. `always` remains accepted by P2a's schema/prepare
-but is **explicitly refused by execution before any payload**.
+Declaration identity persists independently of each run. `manual`,
+`on-failure` and `always` share the same Service state machine and kernel.
+Task retry/absorption semantics are unchanged. This unconnected policy addition
+is not an agent auto adapter, P3b approval or a production rollout.
 
 - Initial online declaration prepares, allocates a new generation and runs.
-  Natural success ends that generation without restart. Manual failure exits
-  without restart. On-failure nonzero/unknown orphan exit schedules bounded
-  exponential backoff `min(max, initial*2^failures)`; **only an explicit later
-  `tick_service`** after the recorded deadline starts the next generation.
-  No sleeping supervisor, timer or reconcile daemon is installed.
+  `manual` does not restart after either success or failure. `on-failure` restarts
+  after nonzero/signal/unknown orphan exit, but not a real observed exit 0.
+  `always` restarts after both real exit 0 and nonzero/signal exits. A recorded
+  orphan with **no real wait** can apply either applicable restart policy only
+  after the existing identity/group/lease convergence checks; its exitCode and
+  signal remain null, never guessed. No policy bypasses cleanupUnknown.
+- Applicable exits schedule the existing bounded exponential backoff
+  `min(maxSeconds, initialSeconds*2^min(failures,32))`. The historical `failures`
+  field counts scheduled restart delays, including exit 0 under `always`;
+  it increments once per terminal generation and is not reset by running or a
+  successful generation. New declaration versions initialize it as before.
+  **Only an explicit later `tick_service` at/after nextStartAt** starts one new
+  generation. Repeated pre-deadline ticks/terminal observations do not extend
+  the deadline or increment it again; repeated ticks of the new running gen do
+  not spawn another. Immutable old generation results are preserved.
+  No sleeping supervisor, timer, background loop or daemon is installed.
+- Prepare/start failure contracts are unchanged: submission prepare failure
+  preserves the previous declaration/process (or leaves no Service head for a
+  new failed submission); a Service head in `failed` does not retry on tick.
+  `always` is not an automatic prepare repair or an unbounded startup retry.
 - New version must be strictly newer when the declaration changes. Online new
   input prepares **before** stopping the old generation. Prepare failure leaves
   the previous declaration/payload unchanged. Once prepared, replacement must
   confirm old group/lease convergence before allocating/spawning a new gen.
-- Offline/stop durably sets hold before effects, clears backoff and suppresses
-  future automatic generations. Explicit restart creates a generation under
+- Offline/stop durably sets hold before effects, clears nextStartAt and
+  suppresses future automatic generations, **including always**. A historical
+  backoffSeconds value is diagnostic only, not a live schedule. Repeated ticks
+  and resubmitting the unchanged online declaration cannot clear hold. Explicit restart creates a generation under
   the same Service identity, not a new Service; offline cannot implicitly
   restart. New online version is an explicit reactivation. Stop does not erase
   old results or declarations.

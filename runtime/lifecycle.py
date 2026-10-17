@@ -30,8 +30,6 @@ class Runtime:
         self.kernel.owned()
         d = copy.deepcopy(validate(d))
         require(d['spec']['node'] == self.node, 'declaration belongs to another node')
-        if d['kind'] == 'Service':
-            require(d['spec']['restart']['policy'] != 'always', 'always is unsupported by execution sandbox')
         return d
 
     def object_dir(self, kind, id):
@@ -243,7 +241,8 @@ class Runtime:
             failed = fact['exitCode'] != 0
         if service['hold'] or run.get('stopRequested'):
             service.update(phase='stopped', nextStartAt=None, hold=True)
-        elif failed and service['declaration']['spec']['restart']['policy'] == 'on-failure':
+        elif (service['declaration']['spec']['restart']['policy'] == 'always' or
+              (failed and service['declaration']['spec']['restart']['policy'] == 'on-failure')):
             r = service['declaration']['spec']['restart']
             delay = min(r['maxSeconds'], r['initialSeconds'] * (2 ** min(service['failures'], 32)))
             service.update(phase='backoff', failures=service['failures'] + 1,
