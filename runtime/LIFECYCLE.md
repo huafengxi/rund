@@ -13,10 +13,15 @@ below is an explicit call. No model or production socket is involved.
 - Linux `/proc`, POSIX `flock`, `setsid`, same local UID. Each root is a private,
   local node filesystem, not a synchronized/multi-host lease. Root ownership,
   no-symlink/hardlink checks and file-only pinned Git preparation extend P2a.
-- **Only self-created immutable cooperating foreground synthetic fixtures.** The
-  caller must not run arbitrary, daemonized, malicious same-UID or FD-closing
-  workloads. This restriction is a precondition, not a security allowlist. No
-  promise is made about sandboxing untrusted programs or hostile PID reuse races.
+- **Only self-created immutable cooperating foreground payloads.** Exec is
+  supported for the foreground process and forked descendants, provided the
+  same inherited `RUND_LEASE_FD` stays open across exec and PID/start identity,
+  process group, session and UID are preserved. The caller must not run arbitrary,
+  daemonized, malicious same-UID, group-escaping or FD-closing workloads. These
+  restrictions are preconditions, not a security allowlist or exec interceptor.
+  No promise is made about sandboxing untrusted programs or hostile PID reuse
+  races. The original synthetic fixtures and the new real-exec fixtures test
+  this bounded contract; ordinary SSH/rsync trees are not thereby certified.
 - `Popen(argv, shell=False, start_new_session=True, pass_fds=(leaseFd,))`, stdin
   `/dev/null`, cwd `work/<kind>/<id>/<attempt>/<generation>`. stdout/stderr are
   exclusive new local files under `logs/` with the same relative identity.
@@ -146,7 +151,12 @@ is not an agent auto adapter, P3b approval or a production rollout.
 
 Before Popen the owner holds a stable per-run flock, publishes `starting`, and
 passes its locked open file description to the payload. The foreground Python
-fixture and every forked child **must keep `RUND_LEASE_FD` open until exit**.
+payload and every forked child **must keep `RUND_LEASE_FD` open until exit,
+including across exec**. The descriptor must be inheritable before exec; setting
+`FD_CLOEXEC`, closing it in the replacement program, changing UID/session/group,
+or daemonizing is outside this support contract. Exec is not a new generation:
+the recorded PID/start identity and the locked open file description remain the
+same. The runtime does not infer compliance just because exec was launched.
 The coordinator closes (never `LOCK_UN`s) its own FD when wait is observed or it
 closes/crashes. A survivor still holds that same flock. The tests verify the
 actual `/proc/<pid>/fd/<n>` inode/device and lock contention **after coordinator

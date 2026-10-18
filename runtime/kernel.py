@@ -1,8 +1,10 @@
 """Linux-only shared execution/identity/stop kernel; explicitly invoked, no daemon.
 
-Cooperating immutable foreground fixtures MUST retain RUND_LEASE_FD (also in
-forked descendants). No exec/daemonize/setsid/closing that FD is supported in a
-payload. This is an availability fence, not an exactly-once/security guarantee.
+Cooperating immutable foreground payloads MUST retain RUND_LEASE_FD (also in
+forked descendants and across exec). Exec is supported only while preserving
+the recorded process identity/group/session/UID and the same inherited lease.
+Daemonization, setsid/group escape and closing that FD remain unsupported.
+This is an availability fence, not an exactly-once/security guarantee.
 """
 import fcntl
 import json
