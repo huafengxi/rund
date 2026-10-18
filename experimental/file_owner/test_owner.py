@@ -537,12 +537,15 @@ class FileOwnerTests(unittest.TestCase):
         self.assertEqual(len(list((self.root / 'work/Task/demo/a1').iterdir())), 1)
 
     def test_15_offline_hold_prepare_failure_and_disjoint_roots(self):
-        self.boot()
+        owner = self.boot()
         d = self.decl('Service', policy='always')
         self.done(self.req('submit', d)); self.ready(kind='Service', attempt='service')
         d2 = copy.deepcopy(d); d2['metadata']['version'] = 2; d2['spec']['desired'] = 'offline'
         offline = self.done(self.req('submit', d2))
         self.assertTrue(offline['hold']); self.assertEqual(offline['generation'], 1)
+        epoch = self.snap()['ownerEpoch']
+        self.kill_owner(owner); self.boot()
+        wait(lambda: self.snap()['ownerEpoch'] != epoch)
         time.sleep(.6)
         self.assertEqual(next(s for s in self.snap()['services'] if s['id'] == 'demo')['generation'], 1)
         bad = copy.deepcopy(d); bad['metadata']['version'] = 3; bad['spec']['sources'][0]['revision'] = '0' * 40
@@ -561,7 +564,7 @@ class FileOwnerTests(unittest.TestCase):
         self.assertFalse(self.work(id='overlap').exists())
 
     def test_16_unknown_status_is_readonly_and_bad_bindings_refused(self):
-        self.boot()
+        owner = self.boot()
         for kind in ('Task', 'Service'):
             e = self.req('status', kind=kind, id='unknown', attemptId='a1' if kind == 'Task' else 'service')
             self.send(e)
@@ -576,6 +579,16 @@ class FileOwnerTests(unittest.TestCase):
         rejected = command([sys.executable, '-B', '-m', 'experimental.file_owner', 'owner',
                             '--root', self.root, '--protocol', self.root / 'protocol', '--node', 'node-a'], good=False)
         self.assertEqual(rejected.returncode, 2)
+        self.done(self.req('release', self.decl()))
+        self.ready(); self.kill_owner(owner)
+        path = self.root / 'state/runs/Task/demo/a1/1/run.json'
+        corrupted = read_json(path); corrupted['generation'] = 2
+        publish(path, corrupted)  # explicit disk-corruption fault, not a fabricated valid run
+        self.boot()
+        wait(lambda: any('run binding mismatch' in str(d) for d in self.snap()['diagnostics']))
+        blocked = self.done(self.req('start', kind='Task', id='demo', attemptId='a1'))
+        self.assertEqual(blocked['status'], 'blocked')
+        self.assertFalse((self.root / 'state/runs/Task/demo/a1/2').exists())
 
     def test_17_wrapper_audit_no_second_execution_layer(self):
         findings = {}

@@ -101,7 +101,12 @@ class Owner:
                                 self.check_declaration(run['declaration'])
                                 require(run['node'] == self.node and
                                         run['declarationDigest'] == digest(canonical(run['declaration'])) and
-                                        run['id'] == obj.name and run['kind'] == kinds.name, 'run binding mismatch')
+                                        run['id'] == obj.name and run['kind'] == kinds.name and
+                                        run['declaration']['metadata']['id'] == obj.name and
+                                        run['declaration']['kind'] == kinds.name and
+                                        run['attemptId'] == (attempt if kinds.name == 'Task' else 'service') and
+                                        run['generation'] == (1 if kinds.name == 'Task' else generation),
+                                        'run binding mismatch')
                                 require(kinds.name != 'Task' or run['declaration'] == d, 'Task declaration mismatch')
                             if kinds.name == 'Task':
                                 tasks.append((obj.name, attempt))
