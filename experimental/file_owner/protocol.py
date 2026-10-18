@@ -49,6 +49,10 @@ def inner_key(rid):
     return 'fi-' + outer_key(rid)[3:]
 
 
+def request_body(e):
+    return {'operation': 'file-owner', 'envelope': e}
+
+
 def target(e):
     if 'declaration' in e:
         d = e['declaration']
@@ -128,7 +132,7 @@ def send(protocol, e):
         require(read(destination) == data, 'requestId file already published with different body')
         # Retain uncommitted temp, ignored forever; no deletion/GC in alpha.
     sync_dir(requests)
-    return {'published': e['requestId'], 'digest': digest(data)}
+    return {'published': e['requestId'], 'digest': digest(canonical(request_body(e)))}
 
 
 def receipt(protocol, rid):

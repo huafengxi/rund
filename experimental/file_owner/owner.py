@@ -8,7 +8,7 @@ from runtime.kernel import now, publish, read_json
 from runtime.lifecycle import Runtime
 from runtime.prepare import canonical, digest, directory, no_links
 from .protocol import (API, binding, decode, disjoint, envelope, inner_key,
-                       outer_key, private, read, target)
+                       outer_key, private, read, request_body, target)
 
 
 def fact_path(path, *, folder=False):
@@ -211,14 +211,14 @@ class Owner:
             # Duplicate lookup precedes current blocking: exact done is immutable.
             if record_path.exists():
                 record = read_json(fact_path(record_path))
-                require(record['digest'] == digest(canonical({'operation': 'file-owner', 'envelope': e})),
+                require(record['digest'] == digest(canonical(request_body(e))),
                         'requestId conflicts with prior body')
-                require(record['body'] == {'operation': 'file-owner', 'envelope': e}, 'record body mismatch')
+                require(record['body'] == request_body(e), 'record body mismatch')
                 return  # done returns original record; pending NEVER replays
             self.existing(e)
             _, _, discovery_errors = self.discover()
             blocked, pending_errors = self.pending()
-            p, rec, duplicate = self.runtime.request(key, {'operation': 'file-owner', 'envelope': e})
+            p, rec, duplicate = self.runtime.request(key, request_body(e))
             require(not duplicate, 'unexpected duplicate')
             self.hook('pending', e)
             if (discovery_errors or pending_errors or target(e) in blocked) and e['action'] not in ('status', 'observe'):

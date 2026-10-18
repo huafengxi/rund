@@ -17,7 +17,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from runtime.kernel import proc, same_identity, publish, read_json
 from runtime.prepare import canonical, digest
-from experimental.file_owner.protocol import API, receipt, snapshot, outer_key
+from experimental.file_owner.protocol import API, receipt, snapshot, outer_key, request_body
 
 BASE = Path(os.environ['RUND_FILE_TEST_OUTPUT']) if 'RUND_FILE_TEST_OUTPUT' in os.environ else Path(tempfile.mkdtemp(prefix='rund-file-tests-'))
 if 'RUND_FILE_TEST_OUTPUT' in os.environ:
@@ -191,6 +191,8 @@ class FileOwnerTests(unittest.TestCase):
         p = command([sys.executable, '-B', '-m', 'experimental.file_owner', 'send',
                      '--protocol', self.protocol, '--request', path], good=good)
         self.evidence.append({'event': 'client-exited', 'at': time.time(), 'request': e, 'rc': p.returncode})
+        if good:
+            self.assertEqual(json.loads(p.stdout)['digest'], digest(canonical(request_body(e))))
         return p
 
     def exact(self, rid):
@@ -202,6 +204,8 @@ class FileOwnerTests(unittest.TestCase):
         self.send(e)
         rec = wait(lambda: (r if (r := receipt(self.protocol, e['requestId'])) and r.get('status') == 'done' else None))
         self.evidence.append({'event': 'done', 'at': time.time(), 'request': e, 'record': rec})
+        self.assertEqual(rec['body'], request_body(e))
+        self.assertEqual(rec['digest'], digest(canonical(request_body(e))))
         return rec['result']
 
     def snap(self):

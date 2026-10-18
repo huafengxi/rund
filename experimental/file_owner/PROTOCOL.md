@@ -48,13 +48,16 @@ pins, empty prepare and original tool checks. Declaration request IDs beginning
 
 Outer request key is `fo-` + first 48 hex of SHA256(original requestId UTF-8).
 S `Runtime.request/receipt` stores `{operation:file-owner, envelope:...}` and its
-canonical digest in original `state/requests`. This is the only execution intent
-record, not another queue/journal. Inner Service/control requests use deterministic
+canonical digest in original `state/requests`. `send` returns this same body
+digest (not a different hash of envelope-only JSON); receipt readers verify it.
+This is the only execution intent record, not another queue/journal. Inner Service/control requests use deterministic
 `fi-` keys. Task retains its original declaration requestId. Namespace collisions
 are rejected by original digest check, never treated as equivalent.
 
 Same rid/body returns original done record/result (not current state), even after
-later policy progress. Different body conflicts. An accepted pending record,
+later policy progress. Done means this operation returned, NOT that a released
+Task or submitted Service finished successfully. Inspect original run facts for
+workload completion. Different body conflicts. An accepted pending record,
 malformed record or unknown effect is never replayed, even with a new rid. Known
 pending blocks its whole `(kind,id)` including Service ticks; corrupt/unknown
 records block all mutations/ticks. Pure observation of Task cannot spawn/stop.
