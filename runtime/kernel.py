@@ -238,47 +238,58 @@ class Kernel:
 
     def observe(self, run):
         key = self.key(run)
-        p = self.processes.get(key)
-        if p is not None:
-            rc = p.poll()
-            if rc is not None:
-                self.waited[key] = rc
-                self.processes.pop(key)
-                fd = self.leases.pop(key, None)
-                if fd is not None:
-                    os.close(fd)
-                self.hook('waited', run)
-        rc = self.waited.get(key)
-        fact = {'exitCode': rc if rc is not None and rc >= 0 else None,
-                'signal': -rc if rc is not None and rc < 0 else None,
-                'waitObserved': rc is not None, 'observedAt': now()}
-        try:
-            busy = self.lease_busy(run)
-            fact['leaseBusy'] = busy
-            if run.get('pid') is None:
-                fact.update(status='unknown' if busy or run['kind'] == 'Service' else 'exited',
-                            reason='starting-identity-unavailable', members=[])
-                return fact
-            if run.get('bootId') != self.boot:
-                fact.update(status='unknown', reason='boot-identity-mismatch', members=[])
-                return fact
-            actual = proc(run['pid'])
-            members = group_members(run)
-            fact.update(leader=actual, members=members)
-            if actual is not None and not same_identity(actual, run):
-                fact.update(status='unknown', reason='identity-mismatch')
-            elif any(m['session'] != run['session'] or m['uid'] != run['uid'] for m in members):
-                fact.update(status='unknown', reason='group-identity-ambiguous')
-            elif actual is not None and actual['state'] not in ('Z', 'X'):
-                fact.update(status='running', reason='identity-live')
-            elif busy or any(m['state'] not in ('Z', 'X') for m in members):
-                fact.update(status='unknown', reason='leader-exited-group-or-lease-remains')
-            else:
-                fact.update(status='exited', reason='group-and-lease-converged' if fact['waitObserved']
-                            else 'orphan-exit-status-unavailable-group-and-lease-converged')
-        except (OSError, ValueError, IndexError) as e:
-            fact.update(status='unknown', reason='identity-observation-unavailable: ' + str(e))
-        return fact
+        # One retry only: a true poll(None) can precede a matching zombie sample
+        # while OUR lease FD still makes lease_busy true. Only the local Popen
+        # may supply wait status; a dead-state sample alone never does.
+        for sample in range(2):
+            p = self.processes.get(key)
+            if p is not None:
+                rc = p.poll()
+                if rc is not None:
+                    self.waited[key] = rc
+                    self.processes.pop(key)
+                    fd = self.leases.pop(key, None)
+                    if fd is not None:
+                        os.close(fd)
+                    self.hook('waited', run)
+            rc = self.waited.get(key)
+            fact = {'exitCode': rc if rc is not None and rc >= 0 else None,
+                    'signal': -rc if rc is not None and rc < 0 else None,
+                    'waitObserved': rc is not None, 'observedAt': now()}
+            try:
+                busy = self.lease_busy(run)
+                fact['leaseBusy'] = busy
+                if run.get('pid') is None:
+                    fact.update(status='unknown' if busy or run['kind'] == 'Service' else 'exited',
+                                reason='starting-identity-unavailable', members=[])
+                    return fact
+                if run.get('bootId') != self.boot:
+                    fact.update(status='unknown', reason='boot-identity-mismatch', members=[])
+                    return fact
+                actual = proc(run['pid'])
+                members = group_members(run)
+                fact.update(leader=actual, members=members)
+                if actual is not None and not same_identity(actual, run):
+                    fact.update(status='unknown', reason='identity-mismatch')
+                elif any(m['session'] != run['session'] or m['uid'] != run['uid'] for m in members):
+                    fact.update(status='unknown', reason='group-identity-ambiguous')
+                elif actual is not None and actual['state'] not in ('Z', 'X'):
+                    fact.update(status='running', reason='identity-live')
+                elif (sample == 0 and self.boot and p is not None and
+                      self.processes.get(key) is p and p.pid == run['pid'] and
+                      same_identity(actual, run)):
+                    # Re-poll nonblocking, then rebuild ALL lease/leader/group
+                    # facts. Even wait(0) must not bypass a surviving child or
+                    # busy lease. None/unreadable/mismatch remain conservative.
+                    continue
+                elif busy or any(m['state'] not in ('Z', 'X') for m in members):
+                    fact.update(status='unknown', reason='leader-exited-group-or-lease-remains')
+                else:
+                    fact.update(status='exited', reason='group-and-lease-converged' if fact['waitObserved']
+                                else 'orphan-exit-status-unavailable-group-and-lease-converged')
+            except (OSError, ValueError, IndexError) as e:
+                fact.update(status='unknown', reason='identity-observation-unavailable: ' + str(e))
+            return fact
 
     def stop(self, run, term_seconds=0.5, kill_seconds=2):
         require(all(type(t) in (int, float) and 0 <= t <= 60 for t in (term_seconds, kill_seconds)), 'invalid stop bounds')

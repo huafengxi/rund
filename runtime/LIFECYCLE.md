@@ -169,6 +169,16 @@ closure**, including a forked child. This is not merely a result field.
   inferred from pgid alone. The checks are conservative cooperating-process
   checks, not an atomic kernel guarantee against malicious races between the
   identity read and killpg.
+- Observation can sample a matching zombie just after this owner's real
+  `Popen.poll()` returned None; the owner's own lease FD still makes the lock
+  busy in that interval. With a known matching boot, exact local Popen PID and
+  strong matching non-live leader (and unambiguous group), the kernel makes at
+  most one additional **real nonblocking poll**, then samples lease, leader and
+  group again. Only an actual wait result releases the owner's FD and supplies
+  an exit status. A second None, unreadable/mismatched identity, absent leader,
+  unknown boot, reopened owner without Popen, live descendant or busy lease
+  cannot turn this retry into success. No general cleanupUnknown retry, sleep,
+  deadline extension, new persisted state or lifecycle/CLI policy is added.
 - Stop sends group TERM, waits bounded time, then group KILL only if leader is
   still strongly matching. It checks actual target/group/lease convergence,
   not signal syscall success. If leader is gone but a child/lease remains,
