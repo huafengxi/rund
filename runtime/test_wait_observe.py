@@ -47,7 +47,7 @@ class OwnedWaitTests(fixtures.LifecycleTests):
                 (work/release).touch()
                 fixtures.wait_for(lambda: (a:=proc(p.pid)) and a['state']=='Z', seconds=3)
                 self.record('delayed-None-return', identity=proc(p.pid),
-                            busy=k.lease_busy(run), members=group_members(identity),
+                            busy=k.lease_busy(run), leader_snapshot=proc(p.pid),
                             ready=read_json(work/'ready'))
             return rc  # never substitutes an exit status
         p.poll = poll
@@ -210,7 +210,7 @@ class OwnedWaitTests(fixtures.LifecycleTests):
         self.assertTrue(r.kernel.lease_busy(run))
 
     def lost_owner(self, descendant):
-        d = self.declaration(mode='leader-exit' if descendant else 'hold')
+        d = self.declaration(mode='leader-exit' if descendant else 'exit')
         self.crash_driver(d)  # real other OS coordinator killed, no local Popen
         run = read_json(self.root/'state/runs/Task/demo/a1/1/run.json')
         work = Path(run['cwd']); (work/('exit-leader' if descendant else 'release')).touch()
