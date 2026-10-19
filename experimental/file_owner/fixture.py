@@ -1,4 +1,4 @@
-"""Cooperating immutable test-only foreground process; retains lease FD."""
+"""Cooperating immutable test-only foreground process; no private runtime FD."""
 import json
 import os
 from pathlib import Path
@@ -13,8 +13,7 @@ def identity():
 
 
 mode, code = sys.argv[1], int(sys.argv[2])
-# Test has no close/daemonize/setsid operation. Forked child retains RUND_LEASE_FD.
-os.fstat(int(os.environ['RUND_LEASE_FD']))
+# No daemonization or session/group escape; no runtime FD protocol.
 Path('ready.json').write_text(json.dumps(identity()))
 if mode == 'fork':
     child = os.fork()

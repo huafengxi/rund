@@ -421,14 +421,16 @@ class FileOwnerTests(unittest.TestCase):
         self.assertEqual((result['waitObserved'], result['exitCode'], result['signal']), (False, None, None))
         self.assertEqual(len(list((self.root / 'work/Task/demo/a1').iterdir())), 1)
 
-    def test_07_leader_dead_child_lease_blocks_always(self):
+    def test_07_leader_dead_child_group_blocks_always(self):
         self.boot()
         self.done(self.req('submit', self.decl('Service', policy='always', mode='fork')))
         work = self.ready(kind='Service', attempt='service')
         wait(lambda: (work / 'child.json').exists())
         child = read_json(work / 'child.json'); self.identities[child['pid']] = child
         result = wait(lambda: self.runfact(phase='cleanupUnknown'))
-        self.assertTrue(result['observation']['leaseBusy'])
+        self.assertNotIn('leaseBusy',result['observation'])
+        self.assertTrue(any(m['pid']==child['pid'] and m['state'] not in ('Z','X')
+                            for m in result['observation']['members']))
         self.assertTrue(result['observation']['waitObserved'])
         stop = self.done(self.control('stop', 'Service'))
         self.assertEqual(stop['phase'], 'cleanupUnknown')
@@ -529,7 +531,7 @@ class FileOwnerTests(unittest.TestCase):
         self.kill_owner(p); self.boot()
         run = wait(lambda: self.runfact(phase='cleanupUnknown'))
         self.assertIsNone(run['pid'])
-        self.assertTrue(run['observation']['leaseBusy'])
+        self.assertNotIn('leaseBusy',run['observation'])
         self.assertFalse(run['observation']['waitObserved'])
         blocked = self.done(self.req('start', kind='Task', id='demo', attemptId='a1'))
         self.assertEqual(blocked['status'], 'blocked')

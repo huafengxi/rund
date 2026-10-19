@@ -1,9 +1,9 @@
 """Linux-only shared execution/identity/stop kernel; explicitly invoked, no daemon.
 
-Cooperating immutable foreground payloads MUST retain RUND_LEASE_FD (also in
-forked descendants and across exec). Exec is supported only while preserving
-the recorded process identity/group/session/UID and the same inherited lease.
-Daemonization, setsid/group escape and closing that FD remain unsupported.
+Cooperating immutable foreground payloads and helpers may exec and close FDs.
+They must preserve process identity/group/session/UID; daemonization and group
+escape remain unsupported. Observation uses strong identity, group membership
+and real owner wait, without per-run lease files or inherited private FDs.
 This is an availability fence, not an exactly-once/security guarantee.
 """
 import fcntl
@@ -84,8 +84,8 @@ def same_identity(actual, recorded):
 def group_members(recorded):
     """Read-only group enumeration. Never grants kill authority without leader.
 
-    Zombies are recorded, but have exited and cannot hold the lease. All scans
-    must succeed; unreadable identity is not evidence of an empty group.
+    Zombies are recorded but have exited. All scans must succeed; unreadable
+    identity is not evidence of an empty group.
     """
     members = []
     for entry in Path('/proc').iterdir():
@@ -106,7 +106,7 @@ class Kernel:
         self.owner_pid = os.getpid()
         self.epoch = uuid.uuid4().hex
         self.hook = hook or (lambda event, run: None)
-        self.processes, self.leases, self.waited = {}, {}, {}
+        self.processes, self.waited = {}, {}
         owners = directory(self.root / 'state/owners')
         # One root is one local node; root lock also fences accidental node aliases.
         self.fd = private_fd(owners / 'node.lock')
@@ -126,10 +126,6 @@ class Kernel:
             raise
 
     def close(self):
-        # Do NOT flock(LOCK_UN): fork/exec payload shares that open description.
-        for fd in self.leases.values():
-            os.close(fd)
-        self.leases.clear()
         if self.fd is not None:
             os.close(self.fd)
             self.fd = None
@@ -174,26 +170,8 @@ class Kernel:
         publish(result, run, final=True)
         return run
 
-    def lease_busy(self, run):
-        fd = private_fd(self.run_dir(run) / 'lease.lock')
-        try:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return False
-            except BlockingIOError:
-                return True
-        finally:
-            os.close(fd)
-
     def launch(self, run, d, prepared):
         key = self.key(run)
-        fd = private_fd(Path(key) / 'lease.lock')
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BaseException:
-            os.close(fd)
-            raise
-        self.leases[key] = fd
         rel = Path(run['kind']) / run['id'] / run['attemptId'] / str(run['generation'])
         work = directory(self.root / 'work' / rel)
         logs = directory(self.root / 'logs' / rel)
@@ -215,18 +193,17 @@ class Kernel:
         argv[0] = executable
         env = {'PATH': os.defpath, 'HOME': str(home), 'TMPDIR': str(tmp), 'LC_ALL': 'C.UTF-8'}
         # Runtime-owned keys cannot be overridden by a declaration.
-        require(not (set(d['spec']['env']) & (set(env) | {'RUND_LEASE_FD'})), 'reserved execution environment key')
+        require(not (set(d['spec']['env']) & set(env)), 'reserved execution environment key')
         env.update({k: expand(v) for k, v in d['spec']['env'].items()})
-        env['RUND_LEASE_FD'] = str(fd)
         run.update(prepareKey=prepared['key'], sourceCommits={s['alias']: s['revision'] for s in d['spec']['sources']},
                    cwd=str(work), stdout=str(logs / 'stdout'), stderr=str(logs / 'stderr'),
-                   argv=argv, leaseFd=fd, bootId=self.boot)
+                   argv=argv, bootId=self.boot)
         self.transition(run, 'starting', 'spawn-intent')
         self.hook('starting', run)
         # No shell. Logs cannot overwrite an earlier invocation.
         with open(logs / 'stdout', 'xb', buffering=0) as out, open(logs / 'stderr', 'xb', buffering=0) as err:
             p = subprocess.Popen(argv, cwd=work, env=env, stdin=subprocess.DEVNULL,
-                                 stdout=out, stderr=err, start_new_session=True, pass_fds=(fd,))
+                                 stdout=out, stderr=err, start_new_session=True)
         self.processes[key] = p
         self.hook('spawned', run)  # intentional non-atomic spawn -> identity publication window
         identity = proc(p.pid)
@@ -240,9 +217,9 @@ class Kernel:
 
     def observe(self, run):
         key = self.key(run)
-        # One retry only: a true poll(None) can precede a matching zombie sample
-        # while OUR lease FD still makes lease_busy true. Only the local Popen
-        # may supply wait status; a dead-state sample alone never does.
+        # One retry only: a true poll(None) can precede a matching zombie sample.
+        # Only the local Popen supplies wait status; a dead-state/empty-group
+        # sample never substitutes for a still-owned, unobserved wait.
         for sample in range(2):
             p = self.processes.get(key)
             if p is not None:
@@ -250,20 +227,16 @@ class Kernel:
                 if rc is not None:
                     self.waited[key] = rc
                     self.processes.pop(key)
-                    fd = self.leases.pop(key, None)
-                    if fd is not None:
-                        os.close(fd)
                     self.hook('waited', run)
             rc = self.waited.get(key)
             fact = {'exitCode': rc if rc is not None and rc >= 0 else None,
                     'signal': -rc if rc is not None and rc < 0 else None,
                     'waitObserved': rc is not None, 'observedAt': now()}
             try:
-                busy = self.lease_busy(run)
-                fact['leaseBusy'] = busy
                 if run.get('pid') is None:
-                    fact.update(status='unknown' if busy or run['kind'] == 'Service' else 'exited',
-                                reason='starting-identity-unavailable', members=[])
+                    # No identity cannot distinguish pre-spawn from post-spawn
+                    # crash. Keep BOTH Task and Service blocked, even if quiet.
+                    fact.update(status='unknown', reason='starting-identity-unavailable', members=[])
                     return fact
                 if run.get('bootId') != self.boot:
                     fact.update(status='unknown', reason='boot-identity-mismatch', members=[])
@@ -280,15 +253,16 @@ class Kernel:
                 elif (sample == 0 and self.boot and p is not None and
                       self.processes.get(key) is p and p.pid == run['pid'] and
                       same_identity(actual, run)):
-                    # Re-poll nonblocking, then rebuild ALL lease/leader/group
-                    # facts. Even wait(0) must not bypass a surviving child or
-                    # busy lease. None/unreadable/mismatch remain conservative.
+                    # Re-poll nonblocking and rebuild leader/group facts.
+                    # None/unreadable/mismatch remain conservative.
                     continue
-                elif busy or any(m['state'] not in ('Z', 'X') for m in members):
-                    fact.update(status='unknown', reason='leader-exited-group-or-lease-remains')
+                elif any(m['state'] not in ('Z', 'X') for m in members):
+                    fact.update(status='unknown', reason='leader-exited-group-remains')
+                elif key in self.processes:
+                    fact.update(status='unknown', reason='owned-wait-unavailable')
                 else:
-                    fact.update(status='exited', reason='group-and-lease-converged' if fact['waitObserved']
-                                else 'orphan-exit-status-unavailable-group-and-lease-converged')
+                    fact.update(status='exited', reason='group-converged' if fact['waitObserved']
+                                else 'orphan-exit-status-unavailable-group-converged')
             except (OSError, ValueError, IndexError) as e:
                 fact.update(status='unknown', reason='identity-observation-unavailable: ' + str(e))
             return fact

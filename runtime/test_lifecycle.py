@@ -257,6 +257,13 @@ class LifecycleTests(unittest.TestCase):
         (self.area/'evidence.json').write_text(json.dumps(self.evidence,indent=2))
         self.assertEqual(cleanup_errors, [])
         self.assertEqual(live, {}, 'test descendants must be exited and reaped')
+        self.assertEqual(list((self.root/'state/runs').rglob('*.lock')), [])
+        for p in (self.root/'state/runs').rglob('*.json'):
+            value=read_json(p)
+            self.assertNotIn('leaseFd',value)
+            self.assertNotIn('leaseBusy',value.get('observation',{}))
+        for r in self.runtimes:
+            self.assertFalse(hasattr(r.kernel,'leases'))
 
     def test_01_task_success_and_execution_contract(self):
         with self.runtime() as r:
@@ -264,13 +271,9 @@ class LifecycleTests(unittest.TestCase):
             work = self.ready(run)
             ready = read_json(work/'ready')
             self.assertEqual(ready['cwd'],str(work))
-            self.assertEqual(set(ready['environment']), {'PATH','HOME','TMPDIR','LC_ALL','SYNTHETIC_VALUE','RUND_LEASE_FD'})
+            self.assertEqual(set(ready['environment']), {'PATH','HOME','TMPDIR','LC_ALL','SYNTHETIC_VALUE'})
             self.assertEqual(ready['environment']['SYNTHETIC_VALUE'],'literal ; not shell')
-            lease = r.kernel.run_dir(run)/'lease.lock'
-            self.assertEqual(ready['leaseInode'],lease.stat().st_ino)
-            self.assertEqual(ready['leaseDev'],lease.stat().st_dev)
-            self.assertTrue(r.kernel.lease_busy(run))
-            self.assertEqual((Path('/proc')/str(run['pid'])/'fd'/str(ready['leaseFd'])).stat().st_ino,lease.stat().st_ino)
+            self.assertFalse((r.kernel.run_dir(run)/'lease.lock').exists())
             (work/'release').touch()
             done = r.wait_task('demo','a1')
             self.assertEqual((done['phase'],done['exitCode'],done['signal'],done['waitObserved']),('succeeded',0,None,True))
@@ -339,13 +342,13 @@ class LifecycleTests(unittest.TestCase):
         with self.runtime() as r:
             run=r.accept_task(self.declaration(mode='group')); work=self.ready(run)
             child=read_json(work/'child-ready')
-            self.assertEqual(child['leaseInode'],read_json(work/'ready')['leaseInode'])
-            self.assertEqual((Path('/proc')/str(child['pid'])/'fd'/str(child['leaseFd'])).stat().st_ino,child['leaseInode'])
+            self.assertEqual(child['pgid'],run['pgid'])
+            self.assertNotIn('RUND_LEASE_FD',child['environment'])
             done=r.control(self.ctl(),term_seconds=1)
             self.assertEqual(done['phase'],'canceled'); self.assertEqual(done['exitCode'],0)
             self.assertEqual([e['signal'] for e in done['stopEvidence'] if e['event']=='signal'],[signal.SIGTERM])
             self.assertEqual(done['stopEvidence'][-1]['status'],'exited')
-            self.assertFalse(done['stopEvidence'][-1]['leaseBusy'])
+            self.assertNotIn('leaseBusy',done['stopEvidence'][-1])
             self.assertFalse(any(m['state'] not in ('Z','X') for m in done['stopEvidence'][-1]['members']))
             self.assertIsNone(proc(child['pid']))
             self.assertTrue((work/'child-exit').exists())
@@ -409,15 +412,14 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual(r.control(self.ctl())['phase'],'canceled')
         with self.assertRaisesRegex(ValueError,'another node'): Runtime(self.root,'node-b')
 
-    def test_12_fd_survives_owner_close_and_orphan_stop(self):
+    def test_12_survives_owner_close_and_orphan_stop(self):
         r=self.runtime(); run=r.accept_task(self.declaration(mode='hold')); work=self.ready(run)
         r.kernel.close()
         with self.runtime() as replacement:
             observed=replacement.observe_task('demo','a1'); self.assertEqual(observed['phase'],'running')
             self.assertNotEqual(observed['ownerEpoch'],run['ownerEpoch'])
-            self.assertTrue(replacement.kernel.lease_busy(observed),'actual inherited FD must fence a second lock open')
-            self.assertEqual((Path('/proc')/str(run['pid'])/'fd'/str(read_json(work/'ready')['leaseFd'])).stat().st_ino,
-                             (replacement.kernel.run_dir(run)/'lease.lock').stat().st_ino)
+            self.assertTrue(same_identity(proc(run['pid']),run))
+            self.assertFalse((replacement.kernel.run_dir(run)/'lease.lock').exists())
             done=replacement.control(self.ctl())
             self.assertEqual(done['phase'],'canceled'); self.assertIsNone(done['exitCode']); self.assertIsNone(done['signal'])
             self.assertFalse(done['waitObserved'],'replacement must not fabricate wait status')
@@ -436,24 +438,24 @@ class LifecycleTests(unittest.TestCase):
         self.crash_driver(self.declaration(mode='hold'),'starting')
         with self.runtime() as r:
             done=r.observe_task('demo','a1')
-            self.assertEqual(done['phase'],'lost'); self.assertIsNone(done['pid'])
-            self.assertFalse(r.kernel.lease_busy(done))
+            self.assertEqual(done['phase'],'cleanupUnknown'); self.assertIsNone(done['pid'])
+            self.assertFalse((r.kernel.run_dir(done)/'result.json').exists())
             self.assertEqual(r.accept_task(self.declaration(mode='hold')),done)
             self.assertFalse(list(self.root.glob('work/*/*/*/*/ready')))
-            self.evidence.append({'lost':done})
+            self.evidence.append({'startingUnknown':done})
 
-    def test_15_crash_spawned_before_record_busy_no_duplicate(self):
+    def test_15_crash_spawned_before_record_unknown_no_duplicate(self):
         self.crash_driver(self.declaration(mode='hold'),'spawned')
         with self.runtime() as r:
             blocked=r.observe_task('demo','a1'); self.assertEqual(blocked['phase'],'cleanupUnknown')
-            self.assertIsNone(blocked['pid']); self.assertTrue(blocked['observation']['leaseBusy'])
+            self.assertIsNone(blocked['pid']); self.assertNotIn('leaseBusy',blocked['observation'])
             self.assertEqual(r.accept_task(self.declaration(mode='hold')),blocked)
             blocked=r.control(self.ctl()); self.assertEqual(blocked['phase'],'cleanupUnknown')
             self.assertFalse(any(e['event']=='signal' for e in blocked['stopEvidence']))
             self.assertEqual(len(self.identities),1)
             self.evidence.append({'startingBusy':blocked,'independentPayload':list(self.identities.values())})
             self.independent_kill(next(iter(self.identities.values())))
-            done=r.observe_task('demo','a1'); self.assertEqual(done['phase'],'lost'); self.assertIsNone(done['exitCode'])
+            done=r.observe_task('demo','a1'); self.assertEqual(done['phase'],'cleanupUnknown'); self.assertIsNone(done['exitCode'])
 
     def test_16_crash_after_real_wait_before_publication_lost(self):
         self.crash_driver(self.declaration(),'waited')
@@ -507,7 +509,7 @@ class LifecycleTests(unittest.TestCase):
             new=copy.deepcopy(d); new['metadata']['version']=2
             s=r.submit_service(new,'version-2'); self.assertEqual(s['generation'],2); self.ready(kind='Service',attempt='service',gen=2)
             old=r.read_run('Service','demo','service',1); self.assertEqual(old['phase'],'stopped')
-            self.assertFalse(old['stopEvidence'][-1]['leaseBusy'])
+            self.assertNotIn('leaseBusy',old['stopEvidence'][-1])
             self.assertIsNone(proc(original['pid']))
             self.assertTrue(r.control(self.ctl('Service','stop',request='old-stop'))['noop'])
             offline=copy.deepcopy(new); offline['metadata']['version']=3; offline['spec']['desired']='offline'
@@ -537,7 +539,7 @@ class LifecycleTests(unittest.TestCase):
             s=r.tick_service('demo'); self.assertEqual(s['phase'],'backoff'); self.assertEqual(s['generation'],1)
             result=r.read_run('Service','demo','service',1)
             self.assertIsNone(result['exitCode']); self.assertIsNone(result['signal']); self.assertFalse(result['waitObserved'])
-            self.assertFalse(result['observation']['leaseBusy'])
+            self.assertNotIn('leaseBusy',result['observation'])
             with patch('runtime.lifecycle.time.time',return_value=s['nextStartAt']+.001): s=r.tick_service('demo')
             self.assertEqual(s['generation'],2); self.ready(kind='Service',attempt='service',gen=2)
             self.assertEqual(r.control(self.ctl('Service','stop',request='stop-new',gen=2))['phase'],'stopped')
@@ -595,7 +597,7 @@ class LifecycleTests(unittest.TestCase):
                 d=self.declaration(id=id,request=id); edit(d)
                 done=r.accept_task(d); self.assertEqual(done['phase'],'failed')
                 self.assertTrue(done['reason'].startswith('start:')); self.assertIsNone(done['pid'])
-                self.assertFalse(r.kernel.lease_busy(done)); self.assertFalse(list(self.root.glob('work/*/*/*/*/ready')))
+                self.assertNotIn('leaseFd',done); self.assertFalse(list(self.root.glob('work/*/*/*/*/ready')))
             r.kernel.close()
             with self.assertRaisesRegex(ValueError,'closed'): r.accept_task(self.declaration())
         # Execution layout gets the same no-symlink validation as P2a paths.
@@ -604,7 +606,7 @@ class LifecycleTests(unittest.TestCase):
         with self.runtime() as r:
             done=r.accept_task(self.declaration())
             self.assertEqual(done['phase'],'failed'); self.assertIn('symlink',done['reason'])
-            self.assertIsNone(done['pid']); self.assertFalse(r.kernel.lease_busy(done))
+            self.assertIsNone(done['pid']); self.assertFalse((r.kernel.run_dir(done)/'lease.lock').exists())
         self.assertEqual((bait/'retained').read_text(),'unchanged')
 
     def test_26_ignored_term_kill_entire_real_child_group(self):
@@ -616,7 +618,7 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual((done['phase'],done['signal'],done['waitObserved']),('canceled',9,True))
             self.assertEqual([e['signal'] for e in done['stopEvidence'] if e['event']=='signal'],[15,9])
             self.assertEqual(done['stopEvidence'][-1]['status'],'exited')
-            self.assertFalse(done['stopEvidence'][-1]['leaseBusy'])
+            self.assertNotIn('leaseBusy',done['stopEvidence'][-1])
             self.assertFalse(any(m['state'] not in ('Z','X') for m in done['stopEvidence'][-1]['members']))
             child_state=proc(child['pid'])
             self.assertTrue(child_state is None or child_state['state'] in ('Z','X'), 'KILL must exit child, not just leader')
@@ -661,7 +663,7 @@ class LifecycleTests(unittest.TestCase):
                     self.assertEqual((s['phase'], s['backoffSeconds'], s['failures']), ('backoff', delay, gen))
                     run = r._service_current(s)
                     self.assertEqual((run['phase'], run['exitCode'], run['waitObserved']), ('exited', code, True))
-                    self.assertFalse(run['observation']['leaseBusy'])
+                    self.assertNotIn('leaseBusy',run['observation'])
                     result = r.kernel.run_dir(run)/'result.json'
                     old_results[result] = (result.read_bytes(), result.stat().st_ino)
                     snapshot = copy.deepcopy(s)
@@ -760,13 +762,13 @@ class LifecycleTests(unittest.TestCase):
     def test_32_always_running_version_prepare_first_offline(self):
         self.with_always(self.test_19_service_version_prepare_first_offline_boundary)
 
-    def test_33_always_leader_child_lease_blocks_even_restart(self):
+    def test_33_always_leader_child_group_blocks_even_restart(self):
         self.with_always(self.test_20_service_leader_child_blocks_then_converges)
 
     def test_34_always_recorded_orphan_no_wait_converges_then_backoff(self):
         self.with_always(self.test_21_service_orphan_lost_only_restarts_after_convergence)
 
-    def test_35_always_spawned_unrecorded_blocks_even_after_lease_free(self):
+    def test_35_always_spawned_unrecorded_blocks_even_after_child_exit(self):
         self.with_always(self.test_22_service_starting_identity_unavailable_stays_blocked)
 
     def test_36_always_starting_before_spawn_without_identity_blocks(self):
@@ -777,7 +779,7 @@ class LifecycleTests(unittest.TestCase):
                 s = r.tick_service('demo')
                 self.assertEqual((s['phase'], s['generation']), ('cleanupUnknown', 1))
             run = r._service_current(s)
-            self.assertIsNone(run['pid']); self.assertFalse(r.kernel.lease_busy(run))
+            self.assertIsNone(run['pid']); self.assertFalse((r.kernel.run_dir(run)/'lease.lock').exists())
             self.assertFalse(list(self.root.glob('work/*/*/*/*/ready')))
             self.evidence.append({'startingNoIdentity': s, 'run': run})
 
@@ -880,7 +882,7 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual(result.read_bytes(), before)
             self.evidence.append({'absorbingTaskSuccess': done})
 
-    def test_42_always_exit_zero_leader_wait_does_not_bypass_child_lease(self):
+    def test_42_always_exit_zero_leader_wait_does_not_bypass_live_child(self):
         with self.runtime() as r:
             d = self.declaration('Service', mode='leader-exit', policy='always')
             s = r.submit_service(d, 'initial'); run = r._service_current(s); work = self.ready(run)
@@ -891,13 +893,14 @@ class LifecycleTests(unittest.TestCase):
                 s = r.tick_service('demo'); self.assertEqual((s['phase'], s['generation']), ('cleanupUnknown', 1))
                 self.assertIsNone(s['nextStartAt'])
             observation = r._service_current(s)['observation']
-            self.assertEqual((observation['exitCode'], observation['waitObserved'], observation['leaseBusy']), (0, True, True))
+            self.assertEqual((observation['exitCode'], observation['waitObserved']), (0, True))
+            self.assertTrue(any(m['pid']==child['pid'] and m['state'] not in ('Z','X') for m in observation['members']))
             self.assertTrue(same_identity(proc(child['pid']), child))
             self.evidence.append({'blockedByChildDespiteRealExitZero': s, 'observation': observation})
             self.independent_kill(child)
             with patch('runtime.lifecycle.time.time', return_value=1000):
                 s = r.tick_service('demo'); self.assertEqual((s['phase'], s['backoffSeconds']), ('backoff', .1))
-            self.assertFalse(r._service_current(s)['observation']['leaseBusy'])
+            self.assertNotIn('leaseBusy',r._service_current(s)['observation'])
             with patch('runtime.lifecycle.time.time', return_value=s['nextStartAt']):
                 s = r.tick_service('demo'); self.assertEqual(s['generation'], 2)
             self.ready(r._service_current(s))
@@ -908,7 +911,7 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual(stopped['phase'], 'stopped')
             final = r._service_current(stopped)
             self.assertEqual([e['signal'] for e in final['stopEvidence'] if e['event']=='signal'], [15, 9])
-            self.assertFalse(final['stopEvidence'][-1]['leaseBusy'])
+            self.assertNotIn('leaseBusy',final['stopEvidence'][-1])
             self.evidence.append({'newGenerationStopped': stopped, 'result': final})
 
     def test_43_always_unindexed_generation_blocks_all_tick_allocation(self):

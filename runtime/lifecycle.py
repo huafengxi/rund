@@ -4,7 +4,6 @@ Only explicit calls progress state. No daemon, scheduler, report/provider logic,
 automatic Task retries or cross-node takeover. See README for crash boundaries.
 """
 import copy
-import os
 import time
 
 from .contract import fields, name, require, validate
@@ -123,9 +122,6 @@ class Runtime:
             if key in self.kernel.processes:
                 # Never turn a possibly live payload into a terminal spawn failure.
                 return self.kernel.transition(run, 'cleanupUnknown', 'spawn-record-unavailable: ' + str(e))
-            fd = self.kernel.leases.pop(key, None)
-            if fd is not None:
-                os.close(fd)
             return self.kernel.finish(run, 'failed', 'start: ' + str(e))
 
     def start_task(self, id, attempt):

@@ -1,7 +1,7 @@
 """Cooperating foreground Linux fixture ONLY. Copied into a fresh pinned Git repo.
 
-Every process retains RUND_LEASE_FD until exit; no exec or daemonization. Files
-in cwd are deterministic test barriers, not a runtime control/protocol channel.
+No private runtime FD is required; no exec or daemonization in this fixture.
+Files in cwd are deterministic test barriers, not a runtime control channel.
 """
 import json
 import os
@@ -14,11 +14,8 @@ import time
 def identity():
     raw = Path('/proc/self/stat').read_text()
     tail = raw[raw.rindex(')') + 2:].split()
-    fd = int(os.environ['RUND_LEASE_FD'])
-    st = os.fstat(fd)
     return {'pid': os.getpid(), 'procStart': int(tail[19]), 'pgid': os.getpgrp(),
-            'session': os.getsid(0), 'uid': os.getuid(), 'leaseFd': fd,
-            'leaseDev': st.st_dev, 'leaseInode': st.st_ino, 'cwd': os.getcwd(),
+            'session': os.getsid(0), 'uid': os.getuid(), 'cwd': os.getcwd(),
             'environment': dict(os.environ)}
 
 

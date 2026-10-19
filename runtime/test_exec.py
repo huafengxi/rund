@@ -1,4 +1,4 @@
-"""Real root/descendant exec preserves identity, lease and conservative gates.
+"""Real root/descendant exec preserves identity and conservative group/wait gates.
 
 Only new exec tests are selected; original lifecycle43/owned-wait15 run apart.
 The retained harness provides isolated roots and strong-identity cleanup only.
@@ -30,7 +30,7 @@ class ExecTests(fixtures.LifecycleTests):
         (cls.source/'fixture.py').write_bytes((fixtures.REPO/'runtime/exec_payload.py').read_bytes())
         git('add', '--', 'fixture.py')
         message = fixtures.BASE/'exec-fixture-message'
-        message.write_text('6ggidb isolated lease-preserving exec fixture\n')
+        message.write_text('6ggidb isolated ordinary exec fixture\n')
         git('-c', 'user.name=Synthetic', '-c', 'user.email=fixture@example.invalid',
             'commit', '-q', '-F', message, '--', 'fixture.py')
         cls.pin = git('rev-parse', 'HEAD').stdout.strip()
@@ -47,13 +47,9 @@ class ExecTests(fixtures.LifecycleTests):
         before = read_json(work/('child-before-exec' if child else 'before-exec'))
         after = read_json(work/('child-ready' if child else 'ready'))
         self.assertTrue(same_identity(after, before))
-        for key in ('leaseFd','leaseDev','leaseInode'):
-            self.assertEqual(after[key], before[key])
-        self.assertTrue(after['leaseInheritable'])
+        self.assertNotIn('RUND_LEASE_FD', after['environment'])
+        self.assertEqual(set(after['fds']), {'0','1','2'})
         self.assertNotEqual(after['argv'][1], before['argv'][1])
-        fd = Path('/proc')/str(after['pid'])/'fd'/str(after['leaseFd'])
-        st = fd.stat()
-        self.assertEqual((st.st_dev,st.st_ino), (after['leaseDev'],after['leaseInode']))
         self.evidence.append({'event':'real-exec', 'before':before, 'after':after})
         return after
 
@@ -65,7 +61,7 @@ class ExecTests(fixtures.LifecycleTests):
         done = r.wait_task('demo','a1',5)
         self.assertEqual((done['phase'],done['exitCode'],done['waitObserved']),
                          ('succeeded' if code==0 else 'failed',code,True))
-        self.assertFalse(done['observation']['leaseBusy'])
+        self.assertNotIn('leaseBusy', done['observation'])
         self.assertFalse(any(p['state'] not in ('Z','X') for p in done['observation']['members']))
         saved = (r.kernel.run_dir(run)/'result.json').read_bytes()
         self.assertEqual(r.accept_task(d),done)
@@ -82,7 +78,7 @@ class ExecTests(fixtures.LifecycleTests):
         self.assertEqual((done['phase'],done['signal'],done['waitObserved']),('canceled',signal.SIGKILL,True))
         fact=done['stopEvidence'][-1]
         self.assertEqual(fact['status'],'exited')
-        self.assertFalse(fact['leaseBusy'])
+        self.assertNotIn('leaseBusy', fact)
         self.assertFalse(any(p['state'] not in ('Z','X') for p in fact['members']))
         self.evidence.append({'event':'exec-cancel','child':child,'result':done})
 
@@ -98,7 +94,6 @@ class ExecTests(fixtures.LifecycleTests):
         for _ in range(3):
             blocked=r.tick_service('demo')
             self.assertEqual((blocked['phase'],blocked['generation']),('cleanupUnknown',1))
-        self.assertTrue(r.kernel.lease_busy(run))
         self.assertTrue(same_identity(proc(child['pid']),child))
         with patch('runtime.kernel.os.killpg',side_effect=AssertionError('no live leader: no kill authority')):
             blocked=r.control(self.ctl(kind='Service',action='stop',attempt='service'),term_seconds=0,kill_seconds=0)
@@ -118,7 +113,7 @@ class ExecTests(fixtures.LifecycleTests):
         work=Path(run['cwd']); self.check_exec(work)
         r=self.runtime()
         self.assertEqual(r.kernel.processes,{})
-        self.assertTrue(r.kernel.lease_busy(run))
+        self.assertTrue(same_identity(proc(run['pid']),run))
         (work/'release').touch()
         fixtures.wait_for(lambda:(a:=proc(run['pid'])) and a['state']=='Z')
         done=r.wait_task('demo','a1',0)

@@ -89,14 +89,14 @@ IDs and run binding. It is not a second registration system. Unindexed runs or
 unknown directories block mutations (no alternate ID/rid route); no synthesized
 head/attempt/generation or recovered wait. Task terminal is absorbing. Owner
 restart uses original orphan observation, preserving lost/null, never old Popen
-wait. Service tick remains original backoff/hold/conservative identity/group/
-lease gates. Pending Service does not tick; this intentionally sacrifices policy
+wait. Service tick retains backoff/hold and conservative identity/group/real-wait
+gates. No per-run lease files or payload FD protocol are used. Pending Service does not tick; this intentionally sacrifices policy
 availability rather than replaying ambiguous effects. Corrupt disk facts require
 manual diagnosis outside this experiment.
 
 One sequence: bounded requests -> discover/validate -> original Task observe or
 eligible Service tick -> atomic snapshot. All actual spawn/wait/stop/identity/
-group/lease operations remain original Kernel. No thread/worker or second Runtime.
+group operations remain in the sole Kernel. No thread/worker or second Runtime.
 Synchronous prepare/stop can delay polling. No fairness/latency guarantee, no
 power-loss exactly-once or hostile same-UID race protection is claimed.
 
@@ -122,13 +122,13 @@ client OS process --atomic persistent request--> private protocol/requests
                                       +--------+--------+
                                                v
                                   original one Kernel/node.lock
-                                Popen / wait / stop / group / lease
+                                Popen / wait / stop / group
                                                |
                                      cooperating foreground payload
 ```
 
 No client process or protocol helper holds Runtime. Fixtures may fork solely to
-exercise the original group/lease gate; they never create another Runtime.
+exercise the group gate; they never create another Runtime.
 Internal Runtime intermediate directories retain S's original umask semantics,
 fenced by the private runtime root; only external protocol directories require
 private mode on every protocol component. Atomic readers allow an opened old

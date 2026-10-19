@@ -5,29 +5,27 @@ Based on nf2q61/design §4–7, following P2a prepare. Nothing imports this from
 `serviced.py`, `sync-loop.sh` or another legacy entry. No service/profile/caller,
 agent adapter, scheduler, protocol, recovery mapping or fixed S→A0 dependency is
 changed. There is no background coordinator, watcher, daemon, automatic startup,
-network transport, lease takeover or new orchestration platform. Every action
+network transport, distributed takeover or new orchestration platform. Every action
 below is an explicit call. No model or production socket is involved.
 
 ## Supported execution contract
 
 - Linux `/proc`, POSIX `flock`, `setsid`, same local UID. Each root is a private,
-  local node filesystem, not a synchronized/multi-host lease. Root ownership,
+  local node filesystem, not a synchronized/multi-host lock. Root ownership,
   no-symlink/hardlink checks and file-only pinned Git preparation extend P2a.
-- **Only self-created immutable cooperating foreground payloads.** Exec is
-  supported for the foreground process and forked descendants, provided the
-  same inherited `RUND_LEASE_FD` stays open across exec and PID/start identity,
-  process group, session and UID are preserved. The caller must not run arbitrary,
-  daemonized, malicious same-UID, group-escaping or FD-closing workloads. These
-  restrictions are preconditions, not a security allowlist or exec interceptor.
-  No promise is made about sandboxing untrusted programs or hostile PID reuse
-  races. The original synthetic fixtures and the new real-exec fixtures test
-  this bounded contract; ordinary SSH/rsync trees are not thereby certified.
-- `Popen(argv, shell=False, start_new_session=True, pass_fds=(leaseFd,))`, stdin
+- **Only self-created immutable cooperating foreground payloads.** Exec and
+  ordinary FD-closing helpers are supported, provided PID/start identity,
+  process group, session and UID are preserved. Descendants must stay in the
+  recorded process group; no daemonization, setsid/setpgid escape or hostile
+  same-UID programs. These are support preconditions, not a security sandbox.
+  No per-run lease file or private payload FD exists. Generic real-exec/helper
+  fixtures test this contract; actual SSH/rsync integration remains unverified.
+- `Popen(argv, shell=False, start_new_session=True)` (default close_fds), stdin
   `/dev/null`, cwd `work/<kind>/<id>/<attempt>/<generation>`. stdout/stderr are
   exclusive new local files under `logs/` with the same relative identity.
   No shell interpolation; only declared `${work}`/`${code.alias}` substitutions.
 - Payload environment is exactly runtime `PATH=os.defpath`, fresh work `HOME`
-  and `TMPDIR`, `LC_ALL=C.UTF-8`, explicit declared variables and `RUND_LEASE_FD`.
+  and `TMPDIR`, `LC_ALL=C.UTF-8`, and explicit declared variables.
   Declared variables cannot override these runtime keys. No inherited agent,
   API-key, proxy, Python import or provider environment. argv[0] is explicitly
   resolved (declared Python uses prepare's verified current interpreter).
@@ -45,7 +43,7 @@ state/requests/<requestId>.json                operation digest + pending/receip
 state/objects/Task/<id>/<attempt>.json         immutable declaration binding
 state/objects/Service/<id>/service.json        declaration and policy head
 state/runs/<kind>/<id>/<attempt>/<gen>/
-  run.json, result.json, lease.lock            local facts, terminal commit, fence
+  run.json, result.json                        local facts, terminal commit
 work/<kind>/<id>/<attempt>/<gen>/              payload cwd, HOME and TMPDIR
 logs/<kind>/<id>/<attempt>/<gen>/stdout,stderr local files, not protocol events
 ```
@@ -90,7 +88,7 @@ not every identical running poll. Each observation includes its actual time.
   `rerun_task(id,oldAttempt,newDeclaration)` requires terminal old attempt and a
   new attempt/request, preserving old facts. A plain release of another attempt
   under an existing Task id is refused. **No Task auto retry, including lost.**
-- `succeeded` only means a real `Popen.poll/wait` observed exit 0 and group/lease
+- `succeeded` only means a real `Popen.poll/wait` observed exit 0 and group
   convergence. Nonzero exits are failed; signals have `exitCode=null, signal=N`.
   Before spawn there is no exit status. Lost wait status is `lost`, both fields
   null, never guessed success from a disappeared pid or a sent signal.
@@ -112,7 +110,7 @@ is not an agent auto adapter, P3b approval or a production rollout.
   after nonzero/signal/unknown orphan exit, but not a real observed exit 0.
   `always` restarts after both real exit 0 and nonzero/signal exits. A recorded
   orphan with **no real wait** can apply either applicable restart policy only
-  after the existing identity/group/lease convergence checks; its exitCode and
+  after the identity/group convergence checks; its exitCode and
   signal remain null, never guessed. No policy bypasses cleanupUnknown.
 - Applicable exits schedule the existing bounded exponential backoff
   `min(maxSeconds, initialSeconds*2^min(failures,32))`. The historical `failures`
@@ -131,7 +129,7 @@ is not an agent auto adapter, P3b approval or a production rollout.
 - New version must be strictly newer when the declaration changes. Online new
   input prepares **before** stopping the old generation. Prepare failure leaves
   the previous declaration/payload unchanged. Once prepared, replacement must
-  confirm old group/lease convergence before allocating/spawning a new gen.
+  confirm old group convergence before allocating/spawning a new gen.
 - Offline/stop durably sets hold before effects, clears nextStartAt and
   suppresses future automatic generations, **including always**. A historical
   backoffSeconds value is diagnostic only, not a live schedule. Repeated ticks
@@ -147,62 +145,48 @@ is not an agent auto adapter, P3b approval or a production rollout.
   effects**. Observe and manual resolution are the boundary, not a new durable
   command scheduler. Unindexed allocated generations also block new spawning.
 
-## Crash, identity, groups and FD facts
+## Crash, identity, groups and real wait
 
-Before Popen the owner holds a stable per-run flock, publishes `starting`, and
-passes its locked open file description to the payload. The foreground Python
-payload and every forked child **must keep `RUND_LEASE_FD` open until exit,
-including across exec**. The descriptor must be inheritable before exec; setting
-`FD_CLOEXEC`, closing it in the replacement program, changing UID/session/group,
-or daemonizing is outside this support contract. Exec is not a new generation:
-the recorded PID/start identity and the locked open file description remain the
-same. The runtime does not infer compliance just because exec was launched.
-The coordinator closes (never `LOCK_UN`s) its own FD when wait is observed or it
-closes/crashes. A survivor still holds that same flock. The tests verify the
-actual `/proc/<pid>/fd/<n>` inode/device and lock contention **after coordinator
-closure**, including a forked child. This is not merely a result field.
+There is no per-run flock, lease file, leaseFd/leaseBusy fact or private FD
+injection. The node/prepare locks still fence their single writers and are not
+passed to payloads. Exec is not a new generation. Helpers may close FDs freely,
+but must remain in the recorded group/session/UID for their entire lifetime.
+This version is evaluated on fresh isolated roots; it neither migrates nor
+deletes old lease artifacts or changes existing consumers' pinned versions.
 
-- Crash after starting, before spawn: no second spawn is attempted. Task may
-  become lost/null once lease is free. A Service without recorded identity
-  remains cleanupUnknown, even after lease release: no proof of the old group
-  can be reconstructed. Availability is intentionally sacrificed.
-- Crash after spawn, before identity publication: `starting + busy lease`
-  blocks release/cancel/restart; no process-name scan, blind kill or second
-  spawn. The harness's separate ready/identity barriers are test-only and never
-  read by runtime for recovery. They grant the harness cleanup authority only.
-- Recorded survivors are checked against Linux boot ID, pid, `/proc/stat`
-  starttime, pgid, session and UID. A new local lock owner may observe them and
-  accept an explicit identity-checked stop. It has **no inherited wait result**.
-- Runtime enumerates group facts read-only; every scan must succeed. Strong
-  matching *live leader* is necessary at TERM and again at KILL escalation.
-  Identity mismatch/unavailable → cleanupUnknown, no kill. No kill authority is
-  inferred from pgid alone. The checks are conservative cooperating-process
-  checks, not an atomic kernel guarantee against malicious races between the
-  identity read and killpg.
-- Observation can sample a matching zombie just after this owner's real
-  `Popen.poll()` returned None; the owner's own lease FD still makes the lock
-  busy in that interval. With a known matching boot, exact local Popen PID and
-  strong matching non-live leader (and unambiguous group), the kernel makes at
-  most one additional **real nonblocking poll**, then samples lease, leader and
-  group again. Only an actual wait result releases the owner's FD and supplies
-  an exit status. A second None, unreadable/mismatched identity, absent leader,
-  unknown boot, reopened owner without Popen, live descendant or busy lease
-  cannot turn this retry into success. No general cleanupUnknown retry, sleep,
-  deadline extension, new persisted state or lifecycle/CLI policy is added.
-- Stop sends group TERM, waits bounded time, then group KILL only if leader is
-  still strongly matching. It checks actual target/group/lease convergence,
-  not signal syscall success. If leader is gone but a child/lease remains,
-  **no blind KILL of that group**, cleanupUnknown; new Service gen is blocked.
-  The owner must explicitly resolve it. Dead zombies are recorded but counted
-  as exited (not running); all non-zombie members must be gone and lease free.
-  Harness subreaping is separate and not a runtime process manager.
-- Once recorded original identity/group have disappeared and the lease is free:
-  Task without a real wait is lost/null; Service can apply its declared policy
-  to a new generation. Wait observed then coordinator crash before final
-  publication can also become lost. No exit status is reconstructed from
-  elapsed time, signals, report content or test fixture exit markers.
+- Crash after `starting`, before spawn OR before identity publication: without
+  a recorded PID/group these windows cannot be distinguished. Both Task and
+  Service remain cleanupUnknown/null, even after any actual child has exited.
+  No process-name scan, blind kill, replay or invented terminal result. This
+  intentionally replaces the old free-lease Task lost shortcut. A known local
+  spawn failure without a created child still produces explicit failed facts.
+  Harness readiness markers provide cleanup authority only, never runtime facts.
+- Recorded survivors are checked against boot ID, pid, starttime, pgid, session
+  and UID. A reopened node owner may observe and explicitly stop a strongly
+  matching live leader; it has **no inherited wait result**.
+- Every read-only group scan must succeed. Strong matching *live leader* is
+  required at TERM and again at KILL. Unreadable/mismatched/ambiguous identity
+  blocks finalization and signals. PGID alone never grants kill authority;
+  this is not an atomic guarantee against hostile same-UID/PID races.
+- A real poll(None) can precede a matching zombie sample. With a matching boot,
+  exact local Popen and strong non-live leader, make at most one additional
+  real nonblocking poll and resample leader/group. If the local Popen still has
+  no wait status, remain cleanupUnknown (`owned-wait-unavailable`), even if the
+  group appears empty/dead. A zombie/sample is not an exit code. No general
+  unknown retry, sleep, deadline extension or new persisted state is added.
+- Stop sends bounded TERM then KILL only while the leader is strongly matching.
+  Signal delivery is not convergence. A live residual member blocks the run
+  and any next Service generation, even if the leader really exited zero.
+  No leader plus residual children means cleanupUnknown and **no blind killpg**.
+  Zombies count as exited; fixture adoption/reaping is separate from runtime.
+- Recorded identity/group converged plus an actual owned wait supplies the
+  real result. Reopened owner without wait: Task lost/null; Service can apply
+  its declared restart policy, keeping null exitCode/signal. Wait observed then
+  owner crash before publication can also be lost. Never infer status from
+  signals, timestamps, reports or fixture markers. Escaped descendants are
+  outside the support contract; no claim to supervise arbitrary process trees.
 
-Stop facts retain before/after identities, group members, lease state, signals,
+Stop facts retain before/after identities, group members, signals,
 timestamps and observation times in `stopEvidence`. Tests retain fixture term/
 exit timestamps separately. Historical S34 had one immediate-live assertion
 failure before passing a rerun; its root cause was not captured. This experiment
@@ -267,7 +251,7 @@ source trees or artifacts. Before any payload, the harness preflights Linux
 subreaper and pidfd syscalls (x86_64/aarch64 test ABI; actual tested host x86_64).
 This supports Conda Python builds missing os/signal pidfd wrappers. Cleanup uses
 only known Popen or separately recorded descendant strong identities + pidfds,
-not candidate stop or process-name matching. Failures snapshot identity/lease/
+not candidate stop or process-name matching. Failures snapshot identity/group/
 stop evidence before cleanup. Each test asserts all recorded descendants exited
 and reaped; preflight failure is a failure, not a skip. Crash windows use actual
 SIGKILL and explicit starting/spawned/recorded/waited barriers; polls only wait

@@ -39,15 +39,14 @@ class OwnedWaitTests(fixtures.LifecycleTests):
             calls.append(rc)
             self.record('real-poll', rc=rc, identity=proc(p.pid),
                         owner=os.getpid(), payload=p.pid, argv=p.args,
-                        leases={x: {'fd': fd, 'inode': os.fstat(fd).st_ino,
-                                    'dev': os.fstat(fd).st_dev} for x, fd in k.leases.items()})
+                        ownedWait=key in k.processes)
             if len(calls) == 1:
                 self.assertIsNone(rc)
                 self.assertTrue(same_identity(proc(p.pid), identity))
                 (work/release).touch()
                 fixtures.wait_for(lambda: (a:=proc(p.pid)) and a['state']=='Z', seconds=3)
                 self.record('delayed-None-return', identity=proc(p.pid),
-                            busy=k.lease_busy(run), leader_snapshot=proc(p.pid),
+                            ownedWait=key in k.processes, leader_snapshot=proc(p.pid),
                             ready=read_json(work/'ready'))
             return rc  # never substitutes an exit status
         p.poll = poll
@@ -70,8 +69,8 @@ class OwnedWaitTests(fixtures.LifecycleTests):
                          ('succeeded' if code == 0 else 'failed', code, True))
         self.assertEqual(calls, [None, code])
         self.assertEqual(waited, ['waited'])
-        self.assertNotIn(r.kernel.key(run), r.kernel.leases)
-        self.assertFalse(done['observation']['leaseBusy'])
+        self.assertNotIn(r.kernel.key(run), r.kernel.processes)
+        self.assertNotIn('leaseBusy', done['observation'])
         self.assertFalse(any(m['state'] not in ('Z','X') for m in done['observation']['members']))
         result = r.kernel.run_dir(run)/'result.json'
         saved = (result.read_bytes(), result.stat().st_ino)
@@ -107,18 +106,19 @@ class OwnedWaitTests(fixtures.LifecycleTests):
                 self.assertEqual(done['phase'], 'running')
                 self.assertFalse(done['waitObserved'])
         self.assertEqual(calls, [None, None])  # no second poll for live leader
-        self.assertTrue(r.kernel.lease_busy(run))
+        self.assertTrue(same_identity(proc(run['pid']),run))
         self.record('live-deadlines', result=done, calls=calls)
 
-    def test_owned_descendant_keeps_lease(self):
+    def test_owned_descendant_blocks_without_private_fd(self):
         r = self.runtime(); run = r.accept_task(self.declaration(mode='leader-exit'))
         work = self.ready(run); child = read_json(work/'child-ready')
         self.arm(r, run, work, 'exit-leader')
         blocked = r.wait_task('demo','a1',10)
         self.record('descendant-blocked', result=blocked, child=proc(child['pid']))
         self.assertEqual(blocked['phase'],'cleanupUnknown')
-        self.assertEqual((blocked['observation']['exitCode'], blocked['observation']['waitObserved'],
-                          blocked['observation']['leaseBusy']), (0, True, True))
+        self.assertEqual((blocked['observation']['exitCode'], blocked['observation']['waitObserved']), (0, True))
+        self.assertTrue(any(m['pid']==child['pid'] and m['state'] not in ('Z','X')
+                            for m in blocked['observation']['members']))
         with patch('runtime.kernel.os.killpg', side_effect=AssertionError('no group kill authority')):
             stopped = r.control(self.ctl(),term_seconds=0,kill_seconds=0)
         self.assertEqual(stopped['phase'],'cleanupUnknown')
@@ -153,7 +153,7 @@ class OwnedWaitTests(fixtures.LifecycleTests):
         self.assertEqual(blocked['phase'],'cleanupUnknown')
         self.assertFalse(blocked['waitObserved'])
         self.assertEqual(calls, [None])
-        self.assertIn(r.kernel.key(run),r.kernel.leases)
+        self.assertIn(r.kernel.key(run),r.kernel.processes)
         self.assertFalse((r.kernel.run_dir(run)/'result.json').exists())
 
     def test_owned_mismatch(self): self.guarded_race('mismatch')
@@ -177,12 +177,10 @@ class OwnedWaitTests(fixtures.LifecycleTests):
     def test_owned_resample_unavailable_after_wait(self):
         r=self.runtime(); run=r.accept_task(self.declaration()); work=self.ready(run)
         p,calls=self.arm(r,run,work)
-        original=r.kernel.lease_busy; samples=[]
-        def lease(recorded):
-            samples.append(True)
-            if len(calls)==2: raise PermissionError('post-wait lease sample unavailable')
-            return original(recorded)
-        with patch.object(r.kernel,'lease_busy',side_effect=lease):
+        def group(recorded):
+            if len(calls)==2: raise PermissionError('post-wait group sample unavailable')
+            return group_members(recorded)
+        with patch('runtime.kernel.group_members',side_effect=group):
             blocked=r.wait_task('demo','a1',0)
         self.record('post-wait-unavailable', result=blocked, calls=calls)
         self.assertEqual(calls,[None,0])
@@ -207,7 +205,8 @@ class OwnedWaitTests(fixtures.LifecycleTests):
         self.assertEqual(calls,[None,None])
         self.assertEqual(blocked['phase'],'cleanupUnknown')
         self.assertFalse(blocked['waitObserved'])
-        self.assertTrue(r.kernel.lease_busy(run))
+        self.assertEqual(blocked['reason'],'owned-wait-unavailable')
+        self.assertTrue(same_identity(proc(run['pid']),run))
 
     def lost_owner(self, descendant):
         d = self.declaration(mode='leader-exit' if descendant else 'exit')
