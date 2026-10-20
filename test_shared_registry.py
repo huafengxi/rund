@@ -107,6 +107,15 @@ class SharedTests(CLITests):
         until(lambda: any('rollback' in e for e in self.snapshot()['diagnostics']))
         self.assertEqual(self.head()['phase'], 'stopped')
 
+    def test_remote_source_is_not_treated_as_a_local_protocol_path(self):
+        from runtime.registry import RegistryOwner
+        self.d['spec']['sources'][0].update(repository='ssh://fixture/objects.git', sshConfig=str(self.area / 'ssh-config'))
+        owner = RegistryOwner(self.config)
+        try:
+            owner.check_declaration(self.d)
+        finally:
+            owner.close()
+
     def test_completed_prepare_failure_retries_without_a_new_publication(self):
         import subprocess
         missing = self.area / 'arrives-later'

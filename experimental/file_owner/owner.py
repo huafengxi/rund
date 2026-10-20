@@ -58,7 +58,9 @@ class Owner:
         validate(d)
         require(d['spec']['node'] == self.node, 'wrong head node')
         for source in d['spec']['sources']:
-            disjoint(self.protocol, repository(source['repository']))
+            repo = repository(source['repository'])
+            if isinstance(repo, Path):
+                disjoint(self.protocol, repo)
 
     def discover(self):
         """Validate original heads and run indexing; never synthesize registration."""
