@@ -92,10 +92,11 @@ def selected(c, *, accept=False):
             require(before == after or new_version > old_version, 'changed service requires version bump: ' + key)
         if old:
             for r in old['payload']['services']:
-                if r['name'] not in incoming and r['name'] not in records:
-                    tombstone = copy.deepcopy(r)
-                    tombstone['declaration']['spec']['desired'] = 'offline'
-                    incoming[r['name']] = tombstone
+                if r['name'] not in incoming:
+                    retained = copy.deepcopy(r)
+                    if r['name'] not in records:
+                        retained['declaration']['spec']['desired'] = 'offline'
+                    incoming[r['name']] = retained
         latest = envelope(dict(candidate['payload'], services=list(incoming.values())))
         accepted = dict(inputDigest=candidate['sha256'], snapshot=latest)
         if accept and accepted != previous:

@@ -107,6 +107,19 @@ class SharedTests(CLITests):
         until(lambda: any('rollback' in e for e in self.snapshot()['diagnostics']))
         self.assertEqual(self.head()['phase'], 'stopped')
 
+    def test_completed_prepare_failure_retries_without_a_new_publication(self):
+        import subprocess
+        missing = self.area / 'arrives-later'
+        self.d['spec']['sources'][0]['repository'] = missing.as_uri()
+        self.release([self.record()]); self.cli('start', 'service-sync')
+        until(lambda: any('prepare:' in e for e in self.snapshot()['diagnostics']))
+        self.assertIsNone(self.head())
+        subprocess.run(['/usr/bin/git', 'clone', '--no-hardlinks', str(self.repo), str(missing)], check=True, capture_output=True)
+        until(lambda: self.head() and self.head()['phase'] == 'running')
+        self.assertEqual(self.snapshot()['registry']['generation'], self.seq)
+        self.d['spec']['desired'] = 'offline'; self.release([self.record()])
+        until(lambda: self.head()['phase'] == 'stopped')
+
     def test_seed_runs_without_shared_input_and_failed_fetch_diagnoses(self):
         self.config['seedServices'] = [self.record()]
         self.path.write_text(json.dumps(self.config))
