@@ -46,6 +46,12 @@ while True:time.sleep(.01)
   if good:self.assertEqual(p.returncode,0,p.stderr)
   return p
  def tearDown(self):self.cli('stop','service-sync',good=False)
+ def test_sync_keeps_unstarted_external_style_profile_offline(self):
+  self.profile('offline',dict(version=1,cmd=['never-execute'],wrapper='none'),'offline')
+  self.cli('start','service-sync');self.cli('sync')
+  status=json.loads(self.cli('status','--machine').stdout)
+  self.assertEqual(status['drift'],0)
+  self.assertEqual(next(r for r in status['services'] if r['name']=='offline')['actual'],'offline')
  def test_pinned_bootstrap_lifecycle_and_restart(self):
   first=json.loads(self.cli('start','service-sync').stdout)
   self.assertIn('/bootstrap-source/code/',first['argv'][2]);self.assertTrue(Path(first['argv'][2]).is_file())

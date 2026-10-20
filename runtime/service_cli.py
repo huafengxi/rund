@@ -139,7 +139,11 @@ def act(c,action,name,path):
         from .registry import expand
         result=subprocess.run([expand(a,c) for a in argv],cwd=c['workspace'],timeout=35)
         require(result.returncode==0,'external manager command failed');return {'external':name,'action':action}
-    d=declaration(c,svc);head=service_head(c,name)
+    head=service_head(c,name)
+    if action=='stop':
+        if head is None or not head['generation']:return {'noop':True,'reason':'never-started'}
+        return exchange(c,'stop',kind='Service',id=head['id'],attemptId='service',expectedGeneration=head['generation'])
+    d=declaration(c,svc)
     if action=='start':
         if head is None or head['declaration']!=d:
             require(head is None or d['metadata']['version']>head['declaration']['metadata']['version'],
@@ -148,8 +152,7 @@ def act(c,action,name,path):
         if head['hold'] and head['generation']:
             return exchange(c,'restart',kind='Service',id=head['id'],attemptId='service',expectedGeneration=head['generation'])
         return head
-    if head is None or not head['generation']:return {'noop':True,'reason':'never-started'}
-    return exchange(c,'stop',kind='Service',id=head['id'],attemptId='service',expectedGeneration=head['generation'])
+    raise ValueError('unsupported service action')
 
 
 def rows(c):
