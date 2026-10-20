@@ -1340,15 +1340,8 @@ def _dispatch():
 
 
 def main():
-    try:
-        rc = _dispatch()
-    except SystemExit as e:
-        rc = e.code
-    if not isinstance(rc, int):
-        if rc:
-            print(rc, file=sys.stderr)  # sys.exit(<str>) semantics
-        rc = 1 if rc else 0
-    sys.exit(rc)  # normal exit: atexit hooks run, streams are flushed
+    from runtime.service_cli import main as run
+    sys.exit(run())
 
 
 if __name__ == "__main__":

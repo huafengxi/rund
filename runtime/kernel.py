@@ -196,18 +196,18 @@ class Kernel:
                 text = text.replace(token, value)
             return text
         argv = [expand(a) for a in d['spec']['argv']]
-        executable = shutil.which(argv[0], path=os.defpath)
-        if argv[0] == d['spec']['toolchain']['python']:
-            executable = read_json(prepared['manifest'])['inputs']['tools']['python']['path']
-        require(executable is not None and Path(executable).is_absolute() and os.access(executable, os.X_OK),
-                'payload executable unavailable')
-        argv[0] = executable
         env = {'PATH': os.defpath, 'HOME': str(home), 'TMPDIR': str(tmp), 'LC_ALL': 'C.UTF-8'}
         # Runtime-owned keys cannot be overridden by a declaration.
         require(not (set(d['spec']['env']) & set(env)), 'reserved execution environment key')
         from .environment import execution_environment
         execution_spec = dict(d['spec'], env={k: expand(v) for k, v in d['spec']['env'].items()})
         env = execution_environment(execution_spec, env)
+        executable = shutil.which(argv[0], path=env['PATH'])
+        if argv[0] == d['spec']['toolchain']['python']:
+            executable = read_json(prepared['manifest'])['inputs']['tools']['python']['path']
+        require(executable is not None and Path(executable).is_absolute() and os.access(executable, os.X_OK),
+                'payload executable unavailable')
+        argv[0] = executable
         context_cwd = d['spec'].get('context', {}).get('cwd')
         if context_cwd is not None:
             work = Path(context_cwd)

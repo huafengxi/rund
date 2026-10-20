@@ -43,6 +43,33 @@ def node_config(path):
     return c
 
 
+def validate_profile(p):
+    require(p.keys()<=PROFILE_KEYS,'unknown profile fields')
+    require(type(p.get('version')) is int and p['version']>0,'positive profile version required')
+    def argv(value):return type(value) is list and bool(value) and all(type(a) is str and a and '\x00' not in a for a in value)
+    require(argv(p.get('cmd')),'profile argv required')
+    require(p.get('wrapper','svc') in ('svc','none'),'invalid wrapper')
+    for key in ('stop_cmd','env_loader'):
+        if key in p:require(argv(p[key]),'invalid '+key)
+    if 'env_loader' in p:require('env_file' in p,'env_loader requires env_file')
+    for key in ('env_file','cwd'):
+        if key in p:require(type(p[key]) is str and p[key] and '\x00' not in p[key],'invalid '+key)
+    from .environment import KEY
+    require(type(p.get('extra_env',{})) is dict,'extra_env must be object')
+    for key,value in p.get('extra_env',{}).items():
+        require(KEY.fullmatch(key) is not None and type(value) in (str,int,float,bool) and '\x00' not in str(value),'invalid extra_env')
+    required=p.get('require_env',[])
+    require(type(required) is list and all(type(k) is str and KEY.fullmatch(k) for k in required),'invalid require_env')
+    if 'status' in p:
+        probe=p['status'];require(type(probe) is dict,'invalid status probe')
+        if 'http' in probe:
+            require(probe.keys()<= {'http','timeout'} and type(probe['http']) is str and probe['http'].startswith(('http://','https://')),'invalid HTTP probe')
+            require(type(probe.get('timeout',5)) in (int,float) and 0<probe.get('timeout',5)<30,'invalid HTTP timeout')
+        else:
+            require(probe.keys()<= {'cmd','expect'} and argv(probe.get('cmd')) and type(probe.get('expect','')) is str,'invalid command probe')
+    return p
+
+
 def services_here(c):
     workspace=Path(c['workspace']);profiles=workspace/'services/profiles';daemons=workspace/'services/daemons'
     here=socket.gethostname().lower();result=[];seen=set()
@@ -55,7 +82,7 @@ def services_here(c):
         require(path.stem==c['node']+'.'+service,'daemon node/name mismatch')
         require(service not in seen,'duplicate local service');seen.add(service)
         require(d['desired'] in ('online','offline'),'invalid desired state')
-        p=document(profiles/(service+'.json'));require(p.keys()<=PROFILE_KEYS,'unknown profile fields')
+        p=validate_profile(document(profiles/(service+'.json')))
         require('name' not in p or p['name']==service,'profile name mismatch')
         require(type(p.get('version')) is int and p['version']>0,'positive profile version required')
         require(type(p.get('cmd')) is list and p['cmd'] and all(type(a) is str and a for a in p['cmd']),'profile argv required')
@@ -81,7 +108,8 @@ def declaration(c,svc):
     aliases=binding.get('sources',list(c['sources']))
     require(type(aliases) is list and aliases,'explicit service source selection required')
     require(all(a in c['sources'] for a in aliases),'unknown service source alias')
-    env={str(k):expand(v,c) for k,v in svc.get('extra_env',{}).items()}
+    env=dict(PLATFORM_WORKSPACE=c['workspace'],PYTHONDONTWRITEBYTECODE='1')
+    env.update({str(k):expand(str(v),c) for k,v in svc.get('extra_env',{}).items()})
     env.update(binding.get('env',{}))
     context=dict(cwd=absolute(svc.get('cwd') or '.',c),home=c['home'],path=c['path'],inheritEnv=c.get('inheritEnv',[]))
     context.update(binding.get('context',{}))
@@ -125,6 +153,8 @@ class RegistryOwner(Owner):
                     continue
                 d=declaration(self.config,svc)
                 if head is None or head['declaration']!=d:
+                    require(head is None or d['metadata']['version']>head['declaration']['metadata']['version'],
+                            'changed service declaration requires a profile version bump')
                     request='registry-'+digest(canonical(d))[:48]
                     value=self.runtime.submit_service(d,request)
                     if value.get('phase') in ('failed','cleanupUnknown'):

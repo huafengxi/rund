@@ -91,6 +91,13 @@ class NativeTests(unittest.TestCase):
   self.r.accept_task(d);done=self.r.wait_task('demo','a1',8)
   self.assertEqual((done['phase'],done['exitCode']),('succeeded',0));self.assertNotIn(secret,json.dumps(done))
   self.assertEqual(Path(done['stdout']).read_text().strip(),hashlib.sha256(secret.encode()).hexdigest())
+ def test_executable_uses_declared_context_path(self):
+  bindir=self.area/'bin';bindir.mkdir();command=bindir/'caller-tool'
+  command.write_text('#!/bin/sh\nprintf "caller path ok\\n"\n');command.chmod(0o700)
+  d=self.declaration();d['spec']['argv']=['caller-tool'];d['spec']['context']={'path':str(bindir)+':/usr/bin:/bin'}
+  self.r.accept_task(d);done=self.r.wait_task('demo','a1',8)
+  self.assertEqual((done['phase'],done['exitCode']),('succeeded',0));self.assertEqual(done['argv'][0],str(command))
+  self.assertEqual(Path(done['stdout']).read_text(),'caller path ok\n')
  def test_failed_credential_loader_does_not_expose_output(self):
   loader=self.area/'loader.py';loader.write_text("import sys;print('synthetic-private-value',file=sys.stderr);sys.exit(7)")
   d=self.declaration();d['spec']['credentialRefs']=[dict(file=str(self.area/'not-read'),loader=[sys.executable,str(loader)],require=['KEY'])]

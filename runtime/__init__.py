@@ -1,1 +1,1 @@
-"""Opt-in experimental prepare/Linux lifecycle. Not imported by legacy serviced."""
+"""Shared native execution, pinned-source preparation and service lifecycle."""
