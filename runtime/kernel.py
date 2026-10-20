@@ -205,7 +205,13 @@ class Kernel:
         env = {'PATH': os.defpath, 'HOME': str(home), 'TMPDIR': str(tmp), 'LC_ALL': 'C.UTF-8'}
         # Runtime-owned keys cannot be overridden by a declaration.
         require(not (set(d['spec']['env']) & set(env)), 'reserved execution environment key')
-        env.update({k: expand(v) for k, v in d['spec']['env'].items()})
+        from .environment import execution_environment
+        execution_spec = dict(d['spec'], env={k: expand(v) for k, v in d['spec']['env'].items()})
+        env = execution_environment(execution_spec, env)
+        context_cwd = d['spec'].get('context', {}).get('cwd')
+        if context_cwd is not None:
+            work = Path(context_cwd)
+            require(work.is_dir(), 'declared context cwd unavailable')
         run.update(prepareKey=prepared['key'], sourceCommits={s['alias']: s['revision'] for s in d['spec']['sources']},
                    cwd=str(work), stdout=str(logs / 'stdout'), stderr=str(logs / 'stderr'),
                    argv=argv, bootId=self.boot)

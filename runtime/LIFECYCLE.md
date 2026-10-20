@@ -269,3 +269,18 @@ members. Same identity/group/UID and real owner wait gates apply. Permission or
 ABI errors remain unknown. Private Git caches normalize the generated init
 config before reading source objects; later byte-for-byte config validation is
 unchanged. Production wiring and adoption still require explicit caller inputs.
+
+## Caller execution context and credential references
+
+Default execution remains isolated. An explicit optional context supplies absolute
+cwd/home, PATH and inherited variable names. Declarations contain names and paths,
+not inherited values. credentialRefs supplies local file, optional loader argv and
+required variable names; loading occurs in memory before spawn. Loader failures
+do not echo captured output. Declared env overrides loaded values; reserved runtime
+keys still require the explicit context interface. Generic registry conversion is
+runtime/registry.py; it uses the same Owner/Runtime and never executes workloads
+itself. The bootstrap owner is outside its own workload set.
+
+File request publication uses exclusive rename on both platforms: Linux renameat2
+RENAME_NOREPLACE and Darwin renamex_np RENAME_EXCL. Existing request bodies must
+match exactly; no hardlink/unlink publication window or unknown-request replay.

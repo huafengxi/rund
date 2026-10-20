@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 import uuid
 
 from runtime.contract import fields, name, no_duplicates, require, validate
@@ -121,10 +122,19 @@ def send(protocol, e):
     temp = requests / ('.tmp-' + uuid.uuid4().hex)
     write_new(temp, data)
     libc = ctypes.CDLL(None, use_errno=True)
-    rename = libc.renameat2
-    rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
-    rename.restype = ctypes.c_int
-    rc = rename(-100, os.fsencode(temp), -100, os.fsencode(destination), 1)
+    if sys.platform == 'darwin':
+        # Darwin sys/stdio.h: RENAME_EXCL = 0x00000004.
+        rename = libc.renamex_np
+        rename.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        rename.restype = ctypes.c_int
+        rc = rename(os.fsencode(temp), os.fsencode(destination), 4)
+    elif sys.platform.startswith('linux'):
+        rename = libc.renameat2
+        rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+        rename.restype = ctypes.c_int
+        rc = rename(-100, os.fsencode(temp), -100, os.fsencode(destination), 1)
+    else:
+        raise ValueError('atomic exclusive publication requires Linux or Darwin')
     if rc:
         error = ctypes.get_errno()
         if error != errno.EEXIST:

@@ -11,6 +11,10 @@ from pathlib import Path
 mode=sys.argv[1]
 if mode=='exec':os.execv(sys.executable,[sys.executable,'-c',"print('exec ok')"])
 if mode=='exit':sys.exit(0)
+if mode=='context':
+ import hashlib
+ assert os.getcwd()==os.environ['EXPECT_CWD'] and os.environ['HOME']==os.environ['EXPECT_HOME']
+ print(hashlib.sha256(os.environ['SYNTHETIC_SECRET'].encode()).hexdigest());sys.exit(0)
 signal.signal(signal.SIGTERM,lambda *a:sys.exit(0))
 Path('ready').write_text(str(os.getpid()))
 while True:time.sleep(.01)
@@ -64,6 +68,54 @@ class NativeTests(unittest.TestCase):
   with patch('runtime.kernel.proc',side_effect=RuntimeError('unavailable native ABI')):
    fact=self.r.kernel.observe(run)
   self.assertEqual(fact['status'],'unknown');self.assertFalse(fact['waitObserved'])
+ def test_file_request_exclusive_publication_and_exact_receipt(self):
+  from experimental.file_owner.owner import Owner
+  from experimental.file_owner import protocol as C
+  d=self.declaration();e=dict(apiVersion=C.API,requestId='native-request',node='fixture',action='accept',declaration=d,declarationDigest=C.digest(C.canonical(d)))
+  o=Owner(self.area/'file-node',self.area/'protocol','fixture')
+  try:
+   C.send(o.protocol,e);C.send(o.protocol,e)
+   for _ in range(3):o.round()
+   receipt=C.receipt(o.protocol,e['requestId']);self.assertEqual(receipt['body'],C.request_body(e));self.assertEqual(receipt['status'],'done')
+   changed=copy.deepcopy(e);changed['declaration']['metadata']['version']=2;changed['declarationDigest']=C.digest(C.canonical(changed['declaration']))
+   with self.assertRaises(ValueError):C.send(o.protocol,changed)
+   self.assertEqual(C.receipt(o.protocol,e['requestId']),receipt)
+  finally:o.close()
+ def test_context_credentials_and_redacted_results(self):
+  import hashlib
+  caller=self.area/'caller';caller.mkdir();home=self.area/'caller-home';home.mkdir()
+  secret='synthetic-private-value';cred=self.area/'credentials';cred.write_text('SYNTHETIC_SECRET='+secret+'\n');cred.chmod(0o600)
+  d=self.declaration(mode='context');d['spec']['context']=dict(cwd=str(caller),home=str(home),path='/usr/bin:/bin')
+  d['spec']['env'].update(EXPECT_CWD=str(caller),EXPECT_HOME=str(home))
+  d['spec']['credentialRefs']=[dict(file=str(cred),loader=[],require=['SYNTHETIC_SECRET'])]
+  self.r.accept_task(d);done=self.r.wait_task('demo','a1',8)
+  self.assertEqual((done['phase'],done['exitCode']),('succeeded',0));self.assertNotIn(secret,json.dumps(done))
+  self.assertEqual(Path(done['stdout']).read_text().strip(),hashlib.sha256(secret.encode()).hexdigest())
+ def test_failed_credential_loader_does_not_expose_output(self):
+  loader=self.area/'loader.py';loader.write_text("import sys;print('synthetic-private-value',file=sys.stderr);sys.exit(7)")
+  d=self.declaration();d['spec']['credentialRefs']=[dict(file=str(self.area/'not-read'),loader=[sys.executable,str(loader)],require=['KEY'])]
+  done=self.r.accept_task(d);self.assertEqual(done['phase'],'failed');self.assertIsNone(done['pid']);self.assertNotIn('synthetic-private-value',json.dumps(done));self.assertIn('credential loader failed',done['reason'])
+ def test_registry_owner_runs_updates_and_stops_service(self):
+  import socket
+  from runtime.registry import RegistryOwner
+  ws=self.area/'caller-root';(ws/'services/profiles').mkdir(parents=True);(ws/'services/daemons').mkdir()
+  profile=ws/'services/profiles/demo.json';daemon=ws/'services/daemons/fixture.demo.json'
+  definition=dict(version=1,cmd=[sys.executable,'${code.main}/payload.py','hold'])
+  profile.write_text(json.dumps(definition));daemon.write_text(json.dumps(dict(hostname=socket.gethostname(),profile='demo',desired='online')))
+  config=dict(apiVersion='rund-node/v1',node='fixture',root=str(self.area/'registry-node'),protocol=str(self.area/'registry-protocol'),workspace=str(ws),python=sys.executable,home=str(ws),path='/usr/bin:/bin',sources={'main':self.declaration()['spec']['sources'][0]},interval=60)
+  owner=RegistryOwner(config)
+  try:
+   value=owner.round();self.assertFalse(value['diagnostics']);until(lambda:(ws/'ready').exists())
+   head=owner.runtime.service('svc-demo');self.assertEqual(head['generation'],1)
+   definition['version']=2;definition['cmd'][-1]='exit';profile.write_text(json.dumps(definition));owner.reconcile_registry()
+   head=owner.runtime.service('svc-demo');self.assertEqual(head['declaration']['metadata']['version'],2);self.assertEqual(head['generation'],2)
+   old=owner.runtime.read_run('Service','svc-demo','service',1);self.assertEqual((old['phase'],old['exitCode'],old['waitObserved']),('stopped',0,True))
+   daemon.write_text(json.dumps(dict(hostname=socket.gethostname(),profile='demo',desired='offline')));owner.reconcile_registry();self.assertTrue(owner.runtime.service('svc-demo')['hold'])
+  finally:
+   for h in owner.runtime.kernel.processes.values():
+    if h.poll() is None:h.terminate()
+    h.wait(timeout=3)
+   owner.close()
  def test_second_owner_rejected(self):
   with self.assertRaises(BlockingIOError):Runtime(self.r.root,'fixture')
 

@@ -70,10 +70,12 @@ def validate(d):
     common = ('node', 'sources', 'prepare', 'toolchain', 'argv', 'cwd', 'env', 'credentialRefs')
     special = ('desired', 'restart') if d['kind'] == 'Service' else ('attemptId', 'requestId')
     s = d['spec']
-    fields(s, common + special)
+    fields(s, common + special, ('context',))
     name(s['node'])
     require(s['prepare'] == [] and type(s['prepare']) is list, 'nonempty prepare unsupported')
-    require(s['credentialRefs'] == [] and type(s['credentialRefs']) is list, 'credential loading unsupported')
+    from .environment import validate_context, validate_credentials
+    validate_credentials(s['credentialRefs'])
+    validate_context(s.get('context', {}))
     fields(s['toolchain'], ('python',))
     text(s['toolchain']['python'])
     require(s['cwd'] == '${work}', 'only independent ${work} cwd supported')
