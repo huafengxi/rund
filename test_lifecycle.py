@@ -3,7 +3,7 @@ import contextlib
 import importlib.util
 import io
 import json
-from fixture_support import retained_directory
+import tempfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -28,7 +28,7 @@ class LifecycleTests(unittest.TestCase):
         for data in ({"cmd": ["x"]}, {"version": True, "cmd": ["x"]},
                      {"version": 1, "cmd": "echo x"},
                      {"version": 1, "cmd": ["x"], "wrapper": "typo"}):
-            with self.subTest(data=data), retained_directory() as root:
+            with self.subTest(data=data), tempfile.TemporaryDirectory() as root:
                 Path(root, "a.json").write_text(json.dumps(data))
                 with self.assertRaises(SystemExit):
                     sv.load_profiles(root)

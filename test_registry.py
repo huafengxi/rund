@@ -31,11 +31,13 @@ Covers:
 Run: python3 test_registry.py          (exit 1 = at least one FAIL)
 """
 
+import atexit
 import contextlib
 import importlib.util
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 
@@ -56,7 +58,10 @@ FAIL = []
 SANDBOXES = []
 
 
-# Retain this run's synthetic trees for inspection; no deletion authority.
+@atexit.register
+def _cleanup():
+    for d in SANDBOXES:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def check(name, cond, detail=""):

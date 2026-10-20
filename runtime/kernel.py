@@ -1,4 +1,4 @@
-"""Linux-only shared execution/identity/stop kernel; explicitly invoked, no daemon.
+"""Shared Linux/Darwin execution/identity/stop kernel; explicitly invoked, no daemon.
 
 Cooperating immutable foreground payloads and helpers may exec and close FDs.
 They must preserve process identity/group/session/UID; daemonization and group
@@ -66,6 +66,13 @@ def private_fd(path):
 
 def proc(pid):
     """None = absent; errors other than disappearance remain explicit unknown."""
+    if sys.platform == 'darwin':
+        from .native import identity
+        value = identity(pid)
+        if value is None:
+            return None
+        return dict(pid=value['pid'], procStart=int(value['start']), pgid=value['pgid'],
+                    session=value['sid'], state=value['state'], uid=value['uid'])
     try:
         p = Path('/proc') / str(pid)
         raw = (p / 'stat').read_text()
@@ -88,10 +95,13 @@ def group_members(recorded):
     identity is not evidence of an empty group.
     """
     members = []
-    for entry in Path('/proc').iterdir():
-        if not entry.name.isdecimal():
-            continue
-        item = proc(int(entry.name))
+    if sys.platform == 'darwin':
+        from .native import group_pids
+        pids = group_pids(recorded['pgid'])
+    else:
+        pids = [int(entry.name) for entry in Path('/proc').iterdir() if entry.name.isdecimal()]
+    for pid in pids:
+        item = proc(pid)
         if item and item['pgid'] == recorded['pgid']:
             members.append(item)
     return members
@@ -99,7 +109,7 @@ def group_members(recorded):
 
 class Kernel:
     def __init__(self, root, node, hook=None):
-        require(sys.platform == 'linux' and Path('/proc/self/stat').exists(), 'Linux /proc required')
+        require(sys.platform in ('linux', 'darwin'), 'Linux or Darwin required')
         name(node)
         self.root = init_root(root)
         self.node = node
@@ -117,7 +127,8 @@ class Kernel:
                 require(read_json(identity) == {'node': node}, 'root belongs to another node')
             else:
                 publish(identity, {'node': node})
-            self.boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+            from .native import boot_id
+            self.boot = boot_id()
             publish(owners / 'owner.json', {'node': node, 'ownerEpoch': self.epoch,
                     'pid': os.getpid(), 'procStart': proc(os.getpid())['procStart'], 'startedAt': now()})
         except BaseException:
@@ -263,7 +274,7 @@ class Kernel:
                 else:
                     fact.update(status='exited', reason='group-converged' if fact['waitObserved']
                                 else 'orphan-exit-status-unavailable-group-converged')
-            except (OSError, ValueError, IndexError) as e:
+            except (OSError, ValueError, IndexError, RuntimeError) as e:
                 fact.update(status='unknown', reason='identity-observation-unavailable: ' + str(e))
             return fact
 
@@ -279,7 +290,7 @@ class Kernel:
             # Recheck strong leader identity at EACH escalation, not just once.
             try:
                 actual = proc(run['pid'])
-            except (OSError, ValueError, IndexError) as e:
+            except (OSError, ValueError, IndexError, RuntimeError) as e:
                 fact.update(status='unknown', reason='identity-recheck-unavailable: ' + str(e))
                 events.append({'event': 'signal-refused', 'at': now(), **fact})
                 return fact, events, sent

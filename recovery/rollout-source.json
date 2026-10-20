@@ -1,0 +1,14 @@
+{
+  "taskId": "6ggidb",
+  "platformRevision": "5919d933289d795ef4df7616659e7943e7f6f494",
+  "module": "serviced",
+  "base": "09f84cce64f5e730a363a6b8ffaf35ba8e67e574",
+  "files": [
+    ".gitignore",
+    "sync-loop.sh",
+    "test_env_loader.py",
+    "test_lifecycle.py",
+    "test_registry.py",
+    "test_serviced_path.py"
+  ]
+}

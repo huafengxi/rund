@@ -1,4 +1,4 @@
-# Explicit Linux foreground lifecycle sandbox (P2b 68wblg; Service always 832kxv)
+# Shared native foreground lifecycle (P2b 68wblg; Service always 832kxv)
 
 **Experimental, unstable API; not a production runtime/P3 or deployment PASS.**
 Based on nf2q61/design §4–7, following P2a prepare. Nothing imports this from
@@ -10,7 +10,7 @@ below is an explicit call. No model or production socket is involved.
 
 ## Supported execution contract
 
-- Linux `/proc`, POSIX `flock`, `setsid`, same local UID. Each root is a private,
+- Linux `/proc` or Darwin `libproc`, POSIX `flock`, `setsid`, same local UID. Each root is a private,
   local node filesystem, not a synchronized/multi-host lock. Root ownership,
   no-symlink/hardlink checks and file-only pinned Git preparation extend P2a.
 - **Only self-created immutable cooperating foreground payloads.** Exec and
@@ -260,3 +260,12 @@ for these bounded barriers. Backoff uses a deterministic test clock.
 Neither implementation nor tests claim macOS, cross-machine takeover, arbitrary
 workloads, credential/remote Git/package execution, power-loss storage semantics,
 agent/provider success, production integration or independent review PASS.
+
+## Native platforms
+
+Linux keeps /proc boot/start/group facts. Darwin uses proc_bsdinfo start timeval,
+kern.boottime and PROC_PGRP_ONLY enumeration via libproc, including foreign group
+members. Same identity/group/UID and real owner wait gates apply. Permission or
+ABI errors remain unknown. Private Git caches normalize the generated init
+config before reading source objects; later byte-for-byte config validation is
+unchanged. Production wiring and adoption still require explicit caller inputs.

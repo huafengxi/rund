@@ -4,8 +4,10 @@ canonical_path() (the channel-independent PATH service children get).
 
 Everything runs on SYNTHETIC trees under tempfile.mkdtemp(): no service is
 started or stopped, no pidfile/meta is touched, nothing is written into the
-workspace. Sandboxes live in the caller's isolated temporary directory and
-are retained for inspection; these tests have no deletion authority.
+workspace. Sandboxes live in the SYSTEM temp dir (never under a production
+root) and are removed at exit only after a realpath identity assertion
+(_sandbox_ok) — a path that is a production root, an ancestor of one, or inside
+one is refused and left alone.
 
 Covers canonical_path semantics:
 + ① existing directories only — a declared segment that is not a directory
@@ -32,9 +34,11 @@ Covers canonical_path semantics:
 Run: python3 test_serviced_path.py     (exit 1 = at least one FAIL)
 """
 
+import atexit
 import contextlib
 import importlib.util
 import os
+import shutil
 import sys
 import tempfile
 
@@ -55,8 +59,44 @@ PASS = 0
 FAIL = []
 SANDBOXES = []
 
-# Synthetic fixtures are retained. No production discovery or cleanup guard
-# experiments are needed to test PATH semantics.
+# Production roots the cleanup guard refuses.
+HOME = os.path.realpath(os.path.expanduser("~"))
+PROD_ROOTS = [HOME]
+for rel in ("m", "m/lore", "m/work", "m/pi-core"):
+    p = os.path.join(HOME, rel)
+    if os.path.isdir(p):
+        PROD_ROOTS.append(os.path.realpath(p))
+TMPROOT = os.path.realpath(tempfile.gettempdir())
+
+
+def _sandbox_ok(path):
+    """Identity predicate for cleanup: `path` must resolve to something STRICTLY
+    inside the system temp dir AND unrelated to any production root (not equal,
+    not an ancestor, not inside). Deliberately no exemption for temp dirs that
+    happen to sit under a production root: an exemption's width would itself be
+    a risk face."""
+    try:
+        real = os.path.realpath(path)
+    except OSError:
+        return False
+    if real == TMPROOT or not real.startswith(TMPROOT + os.sep):
+        return False
+    for prod in PROD_ROOTS:
+        if real == prod or prod.startswith(real + os.sep) \
+                or real.startswith(prod + os.sep):
+            return False
+    return True
+
+
+@atexit.register
+def _cleanup():
+    """Remove the sandboxes — also on assertion failure — but only after the
+    identity assertion; a refused path is left untouched and reported."""
+    for root in SANDBOXES:
+        if _sandbox_ok(root):
+            shutil.rmtree(root)          # no ignore_errors: failures must show
+        else:
+            print(f"  REFUSED to delete {root} (identity assertion failed)")
 
 
 def ok(name, cond, detail=""):

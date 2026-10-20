@@ -24,6 +24,7 @@ LAYOUT = ('cache', 'code', 'manifests', 'work', 'state', 'protocol')
 MAX_OBJECT = 32 * 1024 * 1024
 MAX_FILES = 10000
 MAX_BYTES = 128 * 1024 * 1024
+CACHE_CONFIG = b'[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = true\n'
 
 
 def canonical(value):
@@ -155,13 +156,18 @@ class Git:
             staging = self.root / 'cache' / ('.' + key + '-' + uuid.uuid4().hex)
             directory(staging)
             self.run(['init', '--bare', '--template=', '--object-format=sha1', str(staging)])
+            # Git adds filesystem-dependent defaults (e.g. APFS ignorecase).
+            # Publish our exact private config before reading any source object.
+            read_regular(staging / 'config')
+            write_new(staging / 'rund-config', CACHE_CONFIG)
+            os.replace(staging / 'rund-config', staging / 'config')
             write_new(staging / 'rund-owner', canonical({'format': FORMAT, 'repository': source.as_uri()}))
             sync_dir(staging)
             os.rename(staging, db)
             sync_dir(db.parent)
         require(read_regular(db / 'rund-owner') == canonical({'format': FORMAT, 'repository': source.as_uri()}), 'unknown or incomplete cache (retained)')
         # Git is only run against a config we created, never a source config.
-        expected = b'[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = true\n'
+        expected = CACHE_CONFIG
         require(read_regular(db / 'config') == expected, 'modified cache config refused')
         check_objects(db / 'objects')
         no_links(db / 'HEAD')

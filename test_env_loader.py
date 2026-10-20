@@ -19,19 +19,14 @@ spec.loader.exec_module(sv)
 
 class EnvironmentLoaderTests(unittest.TestCase):
     def setUp(self):
-        self.root = Path(tempfile.mkdtemp(prefix="serviced-env-test-"))
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
         self.source = self.root / "env file 'literal'.env"
         self.source.write_text("TOKEN=plain-test-value\n")
         self.addCleanup(patch.stopall)
         patch.object(sv, "WS", self.root).start()
-        patch.object(sv, "PIDS_DIR", self.root / "run/pids").start()
-        patch.object(sv, "LOGS_DIR", self.root / "run/logs").start()
-        # Dependency location is configuration, not a task identity. Retain it
-        # for the status subprocess even in a non-sibling release layout.
-        env = {"HOME": str(self.root)}
-        if "AGENTD_DIR" in os.environ:
-            env["AGENTD_DIR"] = os.environ["AGENTD_DIR"]
-        patch.dict(os.environ, env, clear=True).start()
+        patch.dict(os.environ, {"HOME": str(self.root)}, clear=True).start()
 
     def service(self, **extra):
         return dict(name="sample", env_file=self.source.name, require_env=["TOKEN"], **extra)
@@ -88,40 +83,6 @@ class EnvironmentLoaderTests(unittest.TestCase):
                 sv._validate_entry(dict(name="sample", cmd=["true"], env_file="file", env_loader=loader))
         with self.assertRaises(SystemExit):
             sv._validate_entry(dict(name="sample", cmd=["true"], env_loader=["loader"]))
-
-    def test_require_env_refuses_before_spawn(self):
-        with patch.object(sv, "svc_entry", return_value=self.service(cmd=["unused"])), \
-             patch.object(sv, "pidfile_alive", return_value=None), \
-             patch.object(sv.subprocess, "Popen") as spawn, \
-             self.assertRaises(SystemExit):
-            self.source.write_text("OTHER=not-token\n")
-            sv.cmd_start_name("sample")
-        spawn.assert_not_called()
-
-    def test_loader_argv_no_shell_and_timeout(self):
-        loader = ["literal executable", "one ; touch should-not-exist"]
-        result = type("Result", (), {"stdout": "TOKEN=loaded\n"})()
-        with patch.object(sv.subprocess, "run", return_value=result) as run:
-            self.assertEqual(sv.build_env(self.service(env_loader=loader))["TOKEN"], "loaded")
-        args, kw = run.call_args
-        self.assertEqual(args[0], loader + [str(self.source)])
-        self.assertNotIn("shell", kw)
-        self.assertEqual(kw["timeout"], sv.ENV_LOAD_TIMEOUT)
-        self.assertEqual(kw["cwd"], str(self.root))
-
-    def test_envscrub_is_single_dependency_policy(self):
-        # Derive policy cases from the dependency, never mirror its scrub list.
-        dirty = {k: "outer" for k in sv.envscrub.ENV_SCRUB_EXACT}
-        dirty.update({p + "TEST": "outer" for p in sv.envscrub.ENV_SCRUB_PREFIXES})
-        dirty.update(OPENAI_API_KEY="service-key", ORDINARY="ordinary")
-        with patch.dict(os.environ, dirty):
-            env = sv.clean_env()
-            expected = sv.envscrub.scrub_env(keep=frozenset())
-        env.pop("PATH")
-        expected.pop("PATH", None)
-        self.assertEqual(env, expected)
-        self.assertEqual(env["OPENAI_API_KEY"], "service-key")
-        self.assertEqual(env["ORDINARY"], "ordinary")
 
     def test_status_works_in_workspace_without_encrypt_module(self):
         profiles = self.root / "services/profiles"
