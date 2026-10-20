@@ -137,6 +137,7 @@ def act(c,action,name,path):
     if name==c.get('bootstrapService','service-sync'):
         if action=='start':return start_owner(c,path)
         if action=='stop':return stop_owner(c)
+    require('registryFile' not in c, 'worker is read-only: publish desired state on the controller')
     require(owner_alive(c),'runtime owner unavailable')
     svc=next((s for s in services_here(c) if s['name']==name),None);require(svc is not None,'service not declared locally')
     if name in c.get('external',[]):
@@ -171,7 +172,7 @@ def rows(c):
         if name==c.get('bootstrapService','service-sync'):
             if alive:
                 record=owner_record(c);actual='online';version=record['version'];pid=record['pid']
-        elif name in c.get('external',[]):
+        elif name in c.get('external',[]) or svc.get('external'):
             # Existing generic probe helpers, with no legacy start/stop/reconcile.
             from .probes import online
             ok,note=online(svc,c);actual='online' if ok else 'offline'
@@ -186,7 +187,7 @@ def rows(c):
                     actual='online' if alive else 'unknown'
                 elif run['phase']=='cleanupUnknown':actual='unknown'
                 note=run.get('reason','')
-        if actual=='online' and svc.get('status') and name not in c.get('external',[]):
+        if actual=='online' and svc.get('status') and name not in c.get('external',[]) and not svc.get('external'):
             from .probes import online
             ok,note=online(svc,c)
             if not ok:actual='offline'
@@ -222,6 +223,10 @@ def main(argv=None):
         if a.action in ('start','stop'):
             print(json.dumps(act(c,a.action,a.name,path)));return 0
         if a.action=='sync':
+            if 'registryFile' in c:
+                require(owner_alive(c),'runtime owner unavailable')
+                print(json.dumps(dict(readOnly=True, message='Owner consumes controller declarations periodically')))
+                return 0
             # Explicit operator invocation uses the same exact file requests.
             for svc in services_here(c):
                 if svc['name']==c.get('bootstrapService','service-sync'):continue
@@ -235,7 +240,14 @@ def main(argv=None):
         if a.name:
             row=next((r for r in values if r['name']==a.name),None);require(row is not None,'service not declared locally')
             print(json.dumps(row));return 0 if row['actual']=='online' else 1
-        result=dict(host=socket.gethostname(),total=len(values),drift=sum(r['state']!='ok' for r in values),services=values)
+        snapshot=C.snapshot(c['protocol']) if Path(c['protocol'],'snapshot.json').exists() else {}
+        diagnostics=list(snapshot.get('diagnostics',[]))
+        if 'registryFile' in c:
+            from .desired import selected
+            _,error=selected(c)
+            if error and error not in diagnostics:diagnostics.append(error)
+        result=dict(host=socket.gethostname(),total=len(values),drift=sum(r['state']!='ok' for r in values),services=values,
+                    diagnostics=diagnostics,blockedTargets=snapshot.get('blockedTargets',[]))
         if a.machine:print(json.dumps(result))
         else:
             print('SERVICE          VERSION DESIRED  ACTUAL   STATE')

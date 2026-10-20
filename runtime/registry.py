@@ -25,7 +25,8 @@ def document(path):
 def node_config(path):
     c=document(path)
     fields(c,('apiVersion','node','root','protocol','workspace','python','home','path','sources'),
-           ('services','external','bootstrapService','bootstrapSource','inheritEnv','interval'))
+           ('services','external','bootstrapService','bootstrapSource','inheritEnv','interval',
+            'registryFile','seedServices','bootstrapVersion'))
     require(c['apiVersion']=='rund-node/v1','unsupported node config')
     name(c['node'])
     for key in ('root','protocol','workspace','python','home'):
@@ -40,6 +41,12 @@ def node_config(path):
     for service in c.get('external',[]):name(service)
     interval=c.get('interval',60)
     require(type(interval) in (int,float) and .1<=interval<=3600,'invalid registry interval')
+    if 'registryFile' in c:
+        require(type(c['registryFile']) is str and Path(c['registryFile']).is_absolute(), 'absolute registryFile required')
+        require(not c.get('services') and not c.get('external'), 'shared registry cannot hide service bindings in node config')
+        from .desired import check, envelope
+        check(envelope(dict(node=c['node'], generation=1, services=c.get('seedServices',[]))), c['node'])
+        require(type(c.get('bootstrapVersion')) is int and c['bootstrapVersion']>0, 'positive bootstrapVersion required')
     return c
 
 
@@ -71,6 +78,13 @@ def validate_profile(p):
 
 
 def services_here(c):
+    if 'registryFile' in c:
+        from .desired import selected
+        result,error=selected(c)
+        # Status shows the retained last-good desired state; snapshot diagnostics
+        # carry any rejected/missing input. Bootstrap is outside its own graph.
+        return [dict(name=c.get('bootstrapService','service-sync'), version=c['bootstrapVersion'],
+                     desired='online', cmd=[c['python']])] + result
     workspace=Path(c['workspace']);profiles=workspace/'services/profiles';daemons=workspace/'services/daemons'
     here=socket.gethostname().lower();result=[];seen=set()
     for path in sorted(daemons.glob('*.json')):
@@ -102,6 +116,12 @@ def absolute(value,c):
 
 
 def declaration(c,svc):
+    if '_declaration' in svc:
+        import copy
+        d=copy.deepcopy(svc['_declaration'])
+        # Online/offline is a control intent, not an executable version change.
+        d['spec']['desired']='online'
+        return validate(d)
     service=svc['name'];binding=c.get('services',{}).get(service,{})
     require(svc.get('wrapper','svc')=='svc' or 'argv' in binding,
             'self-daemonizing service requires an explicit foreground binding')
@@ -144,9 +164,14 @@ class RegistryOwner(Owner):
         blocked,errors=self.pending()
         if errors:
             self.registry_errors.extend(errors);return
-        for svc in services_here(self.config):
+        if 'registryFile' in self.config:
+            from .desired import selected
+            services,error=selected(self.config,accept=True)
+            if error:self.registry_errors.append(error)
+        else:services=services_here(self.config)
+        for svc in services:
             key=svc['name']
-            if key==self.config.get('bootstrapService','service-sync') or key in self.config.get('external',[]):continue
+            if key==self.config.get('bootstrapService','service-sync') or key in self.config.get('external',[]) or svc.get('external'):continue
             id='svc-'+key
             if ('Service',id) in blocked:continue
             try:
@@ -160,8 +185,20 @@ class RegistryOwner(Owner):
                 if head is None or head['declaration']!=d:
                     require(head is None or d['metadata']['version']>head['declaration']['metadata']['version'],
                             'changed service declaration requires a profile version bump')
-                    request='registry-'+digest(canonical(d))[:48]
-                    value=self.runtime.submit_service(d,request)
+                    request='registry-'+digest(canonical(d))[:40]
+                    # Retry only a *completed, pre-spawn* preparation failure.
+                    # Pending/unknown outcomes retain the original exact ID.
+                    retry=0
+                    while True:
+                        candidate=request+('-r'+str(retry) if retry else '')
+                        receipt=self.runtime.root/'state/requests'/(candidate+'.json')
+                        if not receipt.exists():break
+                        prior=document(receipt)
+                        result=prior.get('result',{})
+                        if (prior.get('status')!='done' or result.get('phase')!='failed' or
+                            'previousUnchanged' not in result or not result.get('reason','').startswith('prepare: ')):break
+                        retry+=1
+                    value=self.runtime.submit_service(d,candidate)
                     if value.get('phase') in ('failed','cleanupUnknown'):
                         self.registry_errors.append(key+': '+value.get('reason','declaration failed'))
                 elif head['hold'] and head['generation']:

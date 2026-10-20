@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+import shlex
 import stat
 import subprocess
 import sys
@@ -149,7 +150,34 @@ class Git:
         require(p.returncode == 0, 'git operation failed (' + args[0] + '): ' + p.stderr.decode(errors='replace')[:1000])
         return p.stdout
 
+    def fetch(self, db, source):
+        """Fetch an exact pin using caller SSH references, never ambient Git config."""
+        from urllib.parse import urlsplit
+        protocol = urlsplit(source['repository']).scheme
+        env = dict(self.env)
+        if protocol == 'ssh':
+            require('sshConfig' in source, 'remote SSH source requires sshConfig reference')
+            config = Path(source['sshConfig'])
+            require(config.is_file(), 'SSH config reference unavailable')
+            ssh = shutil.which('ssh')
+            require(ssh is not None, 'missing SSH tool')
+            env['GIT_SSH_COMMAND'] = shlex.join([ssh, '-F', str(config), '-o', 'BatchMode=yes',
+                '-o', 'ConnectTimeout=10', '-o', 'ControlMaster=no', '-o', 'ControlPath=none',
+                '-o', 'ControlPersist=no'])
+        cmd = [self.path, '--no-replace-objects', '-c', 'core.hooksPath=/dev/null',
+               '-c', 'protocol.allow=never', '-c', 'protocol.' + protocol + '.allow=always',
+               '--git-dir=' + str(db), 'fetch', '--no-tags', '--no-recurse-submodules',
+               '--', source['repository'], source['revision'] + ':refs/rund/pins/' + source['revision']]
+        try:
+            p = subprocess.run(cmd, env=env, cwd=self.root, capture_output=True, timeout=120)
+        except subprocess.TimeoutExpired as error:
+            raise ValueError('fixed source fetch timed out: ' + source['alias']) from error
+        require(p.returncode == 0, 'fixed source fetch failed (' + source['alias'] + '): ' +
+                p.stderr.decode(errors='replace')[:1000])
+        check_objects(db / 'objects')
+
     def cache(self, source):
+        uri = source.as_uri() if isinstance(source, Path) else source
         key = digest(str(source).encode())
         db = self.root / 'cache' / key
         if not db.exists():
@@ -161,11 +189,11 @@ class Git:
             read_regular(staging / 'config')
             write_new(staging / 'rund-config', CACHE_CONFIG)
             os.replace(staging / 'rund-config', staging / 'config')
-            write_new(staging / 'rund-owner', canonical({'format': FORMAT, 'repository': source.as_uri()}))
+            write_new(staging / 'rund-owner', canonical({'format': FORMAT, 'repository': uri}))
             sync_dir(staging)
             os.rename(staging, db)
             sync_dir(db.parent)
-        require(read_regular(db / 'rund-owner') == canonical({'format': FORMAT, 'repository': source.as_uri()}), 'unknown or incomplete cache (retained)')
+        require(read_regular(db / 'rund-owner') == canonical({'format': FORMAT, 'repository': uri}), 'unknown or incomplete cache (retained)')
         # Git is only run against a config we created, never a source config.
         expected = CACHE_CONFIG
         require(read_regular(db / 'config') == expected, 'modified cache config refused')
@@ -298,7 +326,7 @@ def prepare(declaration, root):
     from contextlib import ExitStack
     with ExitStack() as stack:
         repos = {repository(s['repository']) for s in d['spec']['sources']}
-        for repo in sorted(repos):
+        for repo in sorted(repos, key=str):
             stack.enter_context(lock(root / 'state/locks' / ('repo-' + digest(str(repo).encode()) + '.lock')))
         # Always verify the full pinned source objects before using a manifest.
         stage = root / 'state/staging' / uuid.uuid4().hex
@@ -306,8 +334,15 @@ def prepare(declaration, root):
         inventories = {}
         for src in d['spec']['sources']:
             repo = repository(src['repository'])
-            objects = source_objects(repo, root)
             db = git.cache(repo)
+            if isinstance(repo, Path):
+                objects = source_objects(repo, root)
+            else:
+                try:
+                    git.object(db, db / 'objects', src['revision'], 'commit')
+                except ValueError:
+                    git.fetch(db, src)
+                objects = db / 'objects'
             target = directory(stage / src['alias'])
             inv = export(git, db, objects, src['revision'], target)
             verify_tree(target, inv)

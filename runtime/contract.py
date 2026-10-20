@@ -37,7 +37,15 @@ def relative(value):
 def repository(value):
     text(value)
     u = urlsplit(value)
-    require(u.scheme == 'file' and not u.netloc and not u.query and not u.fragment, 'only local file:/// repositories supported')
+    require(not u.query and not u.fragment, 'repository query/fragment unsupported')
+    if u.scheme in ('ssh', 'https'):
+        require(bool(u.hostname) and bool(u.path) and u.path.startswith('/') and
+                u.password is None and (u.scheme != 'https' or u.username is None),
+                'remote repository must be absolute ssh:// or credential-free https:// URL')
+        require(not any(c.isspace() or ord(c) < 32 for c in value) and
+                '..' not in unquote(u.path).split('/'), 'unsafe remote repository')
+        return value
+    require(u.scheme == 'file' and not u.netloc, 'repository must be file:///, ssh:// or https://')
     path = Path(unquote(u.path))
     require(path.is_absolute() and path.as_uri() == value and '..' not in path.parts, 'repository must be canonical absolute file URI')
     return path
@@ -89,7 +97,10 @@ def validate(d):
     require(type(s['sources']) is list and 0 < len(s['sources']) <= 64, 'sources must contain 1..64 entries')
     aliases = {}
     for src in s['sources']:
-        fields(src, ('alias', 'repository', 'revision', 'requires'), ('lockFiles',))
+        fields(src, ('alias', 'repository', 'revision', 'requires'), ('lockFiles', 'sshConfig'))
+        if 'sshConfig' in src:
+            text(src['sshConfig'])
+            require(Path(src['sshConfig']).is_absolute(), 'absolute SSH config reference required')
         name(src['alias'])
         require(src['alias'].casefold() not in aliases, 'conflicting source alias')
         aliases[src['alias'].casefold()] = src
