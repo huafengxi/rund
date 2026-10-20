@@ -40,7 +40,7 @@ while True:time.sleep(.01)
   (self.ws/f'services/daemons/fixture.{name}.json').write_text(json.dumps(dict(hostname=socket.gethostname(),profile=name,desired=desired)))
  def cli(self,*args,good=True):
   argv=[sys.executable,'-B',str(S/'rund.py'),'--config',str(self.path),*args]
-  p=subprocess.run(argv,env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1'),cwd=self.area,capture_output=True,text=True,timeout=45)
+  p=subprocess.run(argv,env=dict(os.environ,PYTHONDONTWRITEBYTECODE='1',PATH='/caller-channel-without-git'),cwd=self.area,capture_output=True,text=True,timeout=45)
   self.records.append(dict(argv=argv,rc=p.returncode,stdout=p.stdout,stderr=p.stderr))
   (self.area/'commands.json').write_text(json.dumps(self.records,indent=2))
   if good:self.assertEqual(p.returncode,0,p.stderr)

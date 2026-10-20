@@ -123,8 +123,8 @@ def tool_identity(path):
 
 
 class Git:
-    def __init__(self, root):
-        git = shutil.which('git')
+    def __init__(self, root, path=None):
+        git = shutil.which('git', path=path)
         require(git is not None, 'missing git tool')
         self.identity = tool_identity(git)
         self.path = self.identity['path']
@@ -286,7 +286,7 @@ def verify_tree(path, inventory, *, sealed=False):
 def prepare(declaration, root):
     d = validate(declaration)
     root = init_root(root)
-    git = Git(root)
+    git = Git(root, path=d['spec'].get('context',{}).get('path'))
     python = shutil.which(d['spec']['toolchain']['python'])
     require(python is not None, 'missing declared python tool')
     py_identity = tool_identity(python)

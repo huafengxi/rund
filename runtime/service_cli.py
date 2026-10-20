@@ -64,7 +64,7 @@ def start_owner(c,path):
         require('runtime' in c['sources'],'bootstrap requires a runtime source alias')
         d=dict(apiVersion='rund/v1alpha1',kind='Service',metadata=dict(id='bootstrap-source',version=1),
                spec=dict(node=c['node'],sources=list(c['sources'].values()),prepare=[],toolchain={'python':c['python']},
-                         argv=[c['python'],'${code.runtime}/rund.py'],cwd='${work}',env={},credentialRefs=[],desired='offline',
+                         argv=[c['python'],'${code.runtime}/rund.py'],cwd='${work}',env={},context={'path':c['path']},credentialRefs=[],desired='offline',
                          restart=dict(policy='manual',initialSeconds=1,maxSeconds=60)))
         release=prepare(d,root/'bootstrap-source')
         code=Path(release['code'])/'runtime/rund.py'
