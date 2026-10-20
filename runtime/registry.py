@@ -25,7 +25,7 @@ def document(path):
 def node_config(path):
     c=document(path)
     fields(c,('apiVersion','node','root','protocol','workspace','python','home','path','sources'),
-           ('services','external','bootstrapService','inheritEnv','interval'))
+           ('services','external','bootstrapService','bootstrapSource','inheritEnv','interval'))
     require(c['apiVersion']=='rund-node/v1','unsupported node config')
     name(c['node'])
     for key in ('root','protocol','workspace','python','home'):
@@ -130,12 +130,17 @@ def declaration(c,svc):
 
 
 class RegistryOwner(Owner):
-    def __init__(self,config):
+    def __init__(self,config,path=None):
+        self.config_path=Path(path).resolve() if path else None
         self.config=config;self.registry_errors=[];self.next_registry=0
         super().__init__(config['root'],config['protocol'],config['node'])
 
     def reconcile_registry(self):
         self.registry_errors=[]
+        if self.config_path:
+            latest=node_config(self.config_path)
+            require(all(latest[k]==self.config[k] for k in ('node','root','protocol','workspace','python','home')),'live node identity/context root changed')
+            self.config=latest
         blocked,errors=self.pending()
         if errors:
             self.registry_errors.extend(errors);return

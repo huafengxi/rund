@@ -46,6 +46,27 @@ while True:time.sleep(.01)
   if good:self.assertEqual(p.returncode,0,p.stderr)
   return p
  def tearDown(self):self.cli('stop','service-sync',good=False)
+ def test_failed_official_probe_is_offline_even_with_matching_output(self):
+  from runtime.probes import online
+  svc={'status':{'cmd':[sys.executable,'-c',"import sys;print('running');sys.exit(1)"],'expect':'running'}}
+  self.assertFalse(online(svc,self.config)[0])
+ def test_selected_bootstrap_source_and_live_binding_reload(self):
+  pin=self.config['sources']['runtime']['revision']
+  self.config['sources']['owner']=dict(self.config['sources']['runtime'],alias='owner')
+  self.config['bootstrapSource']='owner';self.config['interval']=.1
+  self.config['services']={'demo':{'sources':['runtime']}}
+  self.path.write_text(json.dumps(self.config));first=json.loads(self.cli('start','service-sync').stdout)
+  self.assertIn('/owner/rund.py',first['argv'][2]);self.assertEqual(first['sourceCommits'],{'owner':pin})
+  self.profile('demo',dict(version=1,cmd=[sys.executable,'${code.runtime}/hold.py'],env_file='envfile',require_env=['KEY']),'online')
+  self.cli('start','demo');until(lambda:(self.ws/'ready').exists());before=int((self.ws/'ready').read_text())
+  self.config['services']['demo']['env']={'RELOAD_PROBE':'synthetic'};self.path.write_text(json.dumps(self.config))
+  self.profile('demo',dict(version=2,cmd=[sys.executable,'${code.runtime}/hold.py'],env_file='envfile',require_env=['KEY']),'online')
+  def changed():
+   snap=json.loads((self.area/'protocol/snapshot.json').read_text())
+   head=next((h for h in snap['services'] if h['id']=='svc-demo'),None)
+   return head and head['declaration']['metadata']['version']==2 and head['declaration']['spec']['env'].get('RELOAD_PROBE')=='synthetic'
+  until(changed);until(lambda:int((self.ws/'ready').read_text())!=before)
+  self.profile('demo',dict(version=2,cmd=[sys.executable,'${code.runtime}/hold.py'],env_file='envfile',require_env=['KEY']),'offline');self.cli('stop','demo')
  def test_sync_keeps_unstarted_external_style_profile_offline(self):
   self.profile('offline',dict(version=1,cmd=['never-execute'],wrapper='none'),'offline')
   self.cli('start','service-sync');self.cli('sync')

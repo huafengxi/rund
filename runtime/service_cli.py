@@ -61,13 +61,20 @@ def start_owner(c,path):
     try:
         fcntl.flock(lock,fcntl.LOCK_EX)
         if owner_alive(c):return owner_record(c)
-        require('runtime' in c['sources'],'bootstrap requires a runtime source alias')
+        alias=c.get('bootstrapSource','runtime')
+        require(alias in c['sources'],'bootstrap source alias unavailable')
+        selected={alias};pending=[alias]
+        while pending:
+            for dependency in c['sources'][pending.pop()]['requires']:
+                require(dependency in c['sources'],'unknown bootstrap source dependency')
+                if dependency not in selected:selected.add(dependency);pending.append(dependency)
+        sources=[c['sources'][key] for key in sorted(selected)]
         d=dict(apiVersion='rund/v1alpha1',kind='Service',metadata=dict(id='bootstrap-source',version=1),
-               spec=dict(node=c['node'],sources=list(c['sources'].values()),prepare=[],toolchain={'python':c['python']},
-                         argv=[c['python'],'${code.runtime}/rund.py'],cwd='${work}',env={},context={'path':c['path']},credentialRefs=[],desired='offline',
+               spec=dict(node=c['node'],sources=sources,prepare=[],toolchain={'python':c['python']},
+                         argv=[c['python'],'${code.'+alias+'}/rund.py'],cwd='${work}',env={},context={'path':c['path']},credentialRefs=[],desired='offline',
                          restart=dict(policy='manual',initialSeconds=1,maxSeconds=60)))
         release=prepare(d,root/'bootstrap-source')
-        code=Path(release['code'])/'runtime/rund.py'
+        code=Path(release['code'])/alias/'rund.py'
         require(code.is_file(),'pinned runtime source has no rund.py')
         logs=directory(root/'bootstrap-logs');env={key:os.environ[key] for key in c.get('inheritEnv',[]) if key in os.environ}
         env.update(HOME=c['home'],PATH=c['path'],LC_ALL='C.UTF-8',PYTHONDONTWRITEBYTECODE='1',PLATFORM_WORKSPACE=c['workspace'])
@@ -75,7 +82,7 @@ def start_owner(c,path):
         with (logs/'owner.log').open('ab',buffering=0) as log:
             child=subprocess.Popen(argv,cwd=c['workspace'],env=env,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True)
         identity=proc(child.pid);require(identity is not None,'bootstrap identity unavailable')
-        record=dict(identity,bootId=boot_id(),version=bootstrap_version(c),sourceCommits={k:v['revision'] for k,v in c['sources'].items()},argv=argv,startedAt=time.time())
+        record=dict(identity,bootId=boot_id(),version=bootstrap_version(c),sourceCommits={v['alias']:v['revision'] for v in sources},argv=argv,startedAt=time.time())
         publish(root/'bootstrap.json',record)
         end=time.monotonic()+15
         while time.monotonic()<end:
@@ -204,8 +211,11 @@ def main(argv=None):
             def stop(*unused):
                 nonlocal stopped;stopped=True
             for sig in (signal.SIGTERM,signal.SIGINT):signal.signal(sig,stop)
-            owner=RegistryOwner(c)
+            owner=RegistryOwner(c,path)
             try:
+                # Confirm the coordinator independently of workload preparation.
+                from experimental.file_owner.owner import Owner
+                Owner.round(owner)
                 while not stopped:owner.round();time.sleep(.05)
             finally:owner.close()
             return 0

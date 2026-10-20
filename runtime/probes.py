@@ -25,5 +25,5 @@ def online(service,config):
     try:
         result=subprocess.run([expand(a,config) for a in probe['cmd']],cwd=config['workspace'],env=env,
                               stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,timeout=10)
-        return probe.get('expect','') in result.stdout,'command probe'
+        return result.returncode==0 and probe.get('expect','') in result.stdout,'command probe'
     except (OSError,ValueError,subprocess.TimeoutExpired):return False,'command probe unavailable'
