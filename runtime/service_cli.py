@@ -247,12 +247,14 @@ def main(argv=None):
             _,error=selected(c)
             if error and error not in diagnostics:diagnostics.append(error)
         result=dict(host=socket.gethostname(),total=len(values),drift=sum(r['state']!='ok' for r in values),services=values,
-                    diagnostics=diagnostics,blockedTargets=snapshot.get('blockedTargets',[]))
+                    diagnostics=diagnostics,blockedTargets=snapshot.get('blockedTargets',[]),registry=snapshot.get('registry'))
         if a.machine:print(json.dumps(result))
         else:
             print('SERVICE          VERSION DESIRED  ACTUAL   STATE')
             for row in values:print(f"{row['name']:<16} {row['version']:<7} {row['desired']:<8} {row['actual']:<8} {row['state']}")
             print(f"\n{result['total']} services, {result['drift']} drift")
+            for diagnostic in diagnostics:print('diagnostic: '+diagnostic)
+            if result['blockedTargets']:print('blocked targets: '+str(result['blockedTargets']))
         return 0
     except (OSError,ValueError,KeyError,TypeError) as error:
         print('rund: '+str(error),file=sys.stderr);return 2

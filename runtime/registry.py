@@ -218,5 +218,11 @@ class RegistryOwner(Owner):
             self.next_registry=time.monotonic()+self.config.get('interval',60)
         value=super().round(batch)
         value['diagnostics'].extend(self.registry_errors)
+        if 'registryFile' in self.config:
+            accepted=self.runtime.root/'registry-accepted.json'
+            if accepted.exists():
+                current=document(accepted)
+                value['registry']=dict(generation=current['snapshot']['payload']['generation'],
+                                       sha256=current['inputDigest'])
         publish(self.protocol/'snapshot.json',value)
         return value
