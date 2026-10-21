@@ -11,7 +11,7 @@ import time
 from .contract import fields,name,require,validate,no_duplicates
 from .prepare import canonical,digest
 from .kernel import publish
-from experimental.file_owner.owner import Owner
+from .file_owner.owner import Owner
 
 PROFILE_KEYS=frozenset(('name','version','summary','note','notes','cmd','match','stop_match','cwd','wrapper','stop_cmd','status','start_timeout','env_file','env_loader','require_env','extra_env'))
 DAEMON_KEYS=frozenset(('hostname','profile','desired','note'))

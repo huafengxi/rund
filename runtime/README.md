@@ -28,7 +28,7 @@ failures emit `rund prepare error` to stderr and exit 2. Argument-parser errors
 also exit 2. Successful prepare emits key/cacheHit/manifest/code/work paths,
 not a run result or lifecycle success. The separate `execute` command is opt-in.
 
-## Frozen experimental JSON subset
+## Local preparation fixture subset
 
 JSON only, UTF-8. Unknown fields at every object level, duplicate JSON keys,
 nonfinite numbers, unsupported versions/kinds and incorrect types fail. Every

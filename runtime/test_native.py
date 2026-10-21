@@ -69,8 +69,8 @@ class NativeTests(unittest.TestCase):
    fact=self.r.kernel.observe(run)
   self.assertEqual(fact['status'],'unknown');self.assertFalse(fact['waitObserved'])
  def test_file_request_exclusive_publication_and_exact_receipt(self):
-  from experimental.file_owner.owner import Owner
-  from experimental.file_owner import protocol as C
+  from runtime.file_owner.owner import Owner
+  from runtime.file_owner import protocol as C
   d=self.declaration();e=dict(apiVersion=C.API,requestId='native-request',node='fixture',action='accept',declaration=d,declarationDigest=C.digest(C.canonical(d)))
   o=Owner(self.area/'file-node',self.area/'protocol','fixture')
   try:

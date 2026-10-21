@@ -1,9 +1,9 @@
-# Local file owner alpha — csusii
+# Local file Owner protocol
 
 The production `RegistryOwner` extends this file Owner; see
 [RUND.md](../../RUND.md) for the integrated contract. This page documents the
 restricted standalone fixture interface. Explicit `python -B -m
-experimental.file_owner owner --root ABS --protocol ABS --node NAME` starts one
+runtime.file_owner owner --root ABS --protocol ABS --node NAME` starts one
 foreground process with one Runtime/Kernel/node flock, without installing
 transport or deployment. The owner remains until explicitly terminated,
 independently of clients.
@@ -104,7 +104,7 @@ power-loss exactly-once or hostile same-UID race protection is claimed.
 
 ## Client
 
-`python -B -m experimental.file_owner send --protocol ABS --request ABS_JSON`
+`python -B -m runtime.file_owner send --protocol ABS --request ABS_JSON`
 only publishes then exits, without waiting. `receipt --protocol ABS --rid ID`
 returns exact original record or null; `snapshot --protocol ABS` reads projection.
 Neither read starts/recovers a workload. Unknown status/observe/start/control
@@ -140,4 +140,4 @@ snapshot observedAt is projection time; actual process observation time is the
 original run observation.observedAt (or recorded startedAt), not file mtime.
 
 Run tests with `RUND_FILE_TEST_OUTPUT=ABS_NEW_DIR python -B -m unittest
-experimental.file_owner.test_owner -v`. Artifacts/identities/errors are retained.
+runtime.file_owner.test_owner -v`. Artifacts/identities/errors are retained.

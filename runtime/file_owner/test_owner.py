@@ -17,7 +17,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from runtime.kernel import proc, same_identity, publish, read_json
 from runtime.prepare import canonical, digest
-from experimental.file_owner.protocol import API, receipt, snapshot, outer_key, request_body
+from runtime.file_owner.protocol import API, receipt, snapshot, outer_key, request_body
 
 BASE = Path(os.environ['RUND_FILE_TEST_OUTPUT']) if 'RUND_FILE_TEST_OUTPUT' in os.environ else Path(tempfile.mkdtemp(prefix='rund-file-tests-'))
 if 'RUND_FILE_TEST_OUTPUT' in os.environ:
@@ -80,7 +80,7 @@ def command(argv, *, env=ENV, good=True):
 DRIVER = r'''
 import json,sys,time,traceback
 from pathlib import Path
-from experimental.file_owner.owner import Owner
+from runtime.file_owner.owner import Owner
 from runtime.kernel import publish
 import runtime.kernel as kernel
 root,protocol,area,event,rid = sys.argv[1:]
@@ -134,7 +134,7 @@ class FileOwnerTests(unittest.TestCase):
     def setUpClass(cls):
         cls.source = BASE / 'source'; cls.source.mkdir()
         command(['git', '-C', cls.source, 'init', '-q', '--template='])
-        (cls.source / 'fixture.py').write_bytes((REPO / 'experimental/file_owner/fixture.py').read_bytes())
+        (cls.source / 'fixture.py').write_bytes((REPO / 'runtime/file_owner/fixture.py').read_bytes())
         command(['git', '-C', cls.source, 'add', '--', 'fixture.py'])
         msg = BASE / 'fixture-message'; msg.write_text('csusii isolated cooperative foreground fixture\n')
         command(['git', '-C', cls.source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
@@ -151,7 +151,7 @@ class FileOwnerTests(unittest.TestCase):
 
     def start_owner(self, event='', rid='fault', *, cli=False, node='node-a'):
         log = (self.area / ('owner-' + str(len(self.owners)) + '.log')).open('w')
-        argv = ([sys.executable, '-B', '-m', 'experimental.file_owner', 'owner', '--root', str(self.root),
+        argv = ([sys.executable, '-B', '-m', 'runtime.file_owner', 'owner', '--root', str(self.root),
                  '--protocol', str(self.protocol), '--node', node] if cli else
                 [sys.executable, '-B', '-c', DRIVER, str(self.root), str(self.protocol), str(self.area), event, rid])
         p = subprocess.Popen(argv, env=ENV, cwd=BASE / 'cwd', stdout=log, stderr=subprocess.STDOUT)
@@ -188,7 +188,7 @@ class FileOwnerTests(unittest.TestCase):
     def send(self, e, good=True):
         path = self.area / ('client-' + str(time.time_ns()) + '.json')
         publish(path, e)
-        p = command([sys.executable, '-B', '-m', 'experimental.file_owner', 'send',
+        p = command([sys.executable, '-B', '-m', 'runtime.file_owner', 'send',
                      '--protocol', self.protocol, '--request', path], good=good)
         self.evidence.append({'event': 'client-exited', 'at': time.time(), 'request': e, 'rc': p.returncode})
         if good:
@@ -505,7 +505,7 @@ class FileOwnerTests(unittest.TestCase):
             self.evidence.append({'event': 'concurrent-reader', 'pid': pp.pid, **value})
         result = self.done(self.req('status', kind='Task', id='demo', attemptId='a1'))
         self.assertEqual(result['pid'], rec['result']['pid'])
-        queried = command([sys.executable, '-B', '-m', 'experimental.file_owner', 'receipt',
+        queried = command([sys.executable, '-B', '-m', 'runtime.file_owner', 'receipt',
                            '--protocol', self.protocol, '--rid', 'fault'])
         self.assertEqual(json.loads(queried.stdout), rec)
 
@@ -578,7 +578,7 @@ class FileOwnerTests(unittest.TestCase):
             result = self.send(e, good=False); self.assertEqual(result.returncode, 2)
         self.assertFalse(self.work(id='mustnotstart').exists())
         # Explicit same-root protocol alias is rejected before Runtime creation.
-        rejected = command([sys.executable, '-B', '-m', 'experimental.file_owner', 'owner',
+        rejected = command([sys.executable, '-B', '-m', 'runtime.file_owner', 'owner',
                             '--root', self.root, '--protocol', self.root / 'protocol', '--node', 'node-a'], good=False)
         self.assertEqual(rejected.returncode, 2)
         self.done(self.req('release', self.decl()))
@@ -595,7 +595,7 @@ class FileOwnerTests(unittest.TestCase):
     def test_17_wrapper_audit_no_second_execution_layer(self):
         findings = {}
         for filename in ('owner.py', 'protocol.py', '__main__.py'):
-            tree = ast.parse((REPO / 'experimental/file_owner' / filename).read_text())
+            tree = ast.parse((REPO / 'runtime/file_owner' / filename).read_text())
             calls = [ast.unparse(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)]
             forbidden = [c for c in calls if any(t in c for t in ('Popen', 'kill', 'fork', 'execv', 'group_members', 'os.system'))]
             self.assertEqual(forbidden, [])

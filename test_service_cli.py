@@ -15,7 +15,7 @@ def until(fn,seconds=15):
 class CLITests(unittest.TestCase):
  def setUp(self):
   self.area=BASE/self._testMethodName;self.area.mkdir();self.repo=self.area/'source';self.repo.mkdir()
-  for folder in ('runtime','experimental'):
+  for folder in ('runtime',):
    for p in (S/folder).rglob('*.py'):
     if p.name.startswith('test_') or '__pycache__' in p.parts:continue
     dest=self.repo/p.relative_to(S);dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(p.read_bytes())
@@ -91,6 +91,7 @@ class EntrypointTests(unittest.TestCase):
  def test_entrypoint_without_legacy_file_or_agentd_dependency(self):
   area=BASE/'entrypoint-without-legacy';area.mkdir()
   self.assertFalse((S/'serviced.py').exists())
+  self.assertFalse((S/'experimental').exists())
   env=dict(os.environ,AGENTD_DIR=str(area/'missing-agentd'),PLATFORM_WORKSPACE=str(area),PYTHONDONTWRITEBYTECODE='1')
   p=subprocess.run([sys.executable,'-B',str(S/'rund.py'),'--help'],cwd=area,env=env,capture_output=True,text=True,timeout=5)
   (area/'command.json').write_text(json.dumps(dict(rc=p.returncode,stdout=p.stdout,stderr=p.stderr),indent=2))

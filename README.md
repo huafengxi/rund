@@ -4,7 +4,7 @@
 
 共享期望态模式下，Owner 只读消费主控发布的完整节点快照，私有状态保留最后有效输入与删除墓碑；最小本机配置只带身份、工具和同步种子。声明版本、固定源码、执行环境与凭据引用都在服务声明中；发布、单写者、offline/删除与故障语义见 [RUND.md](RUND.md)。
 
-正式入口为 `rund.py`，CLI 实现为 `runtime/service_cli.py`。一个本机 Owner 同时承接 agent 工作负载和普通 Service。调用方注册表与配置合同见 [RUND.md](RUND.md)，执行声明/内核合同见 runtime/；文件接口见 experimental/file_owner/。Linux 与 Darwin 使用原生 boot/start/uid/session/pgid 事实；未知身份和未完成请求保持未知，不凭 PID、超时或快照伪造 wait、重放动作。
+正式入口为 `rund.py`，CLI 实现为 `runtime/service_cli.py`。一个本机 Owner 同时承接 agent 工作负载和普通 Service。调用方注册表与配置合同见 [RUND.md](RUND.md)，执行声明/内核合同见 runtime/；文件接口见 runtime/file_owner/。Linux 与 Darwin 使用原生 boot/start/uid/session/pgid 事实；未知身份和未完成请求保持未知，不凭 PID、超时或快照伪造 wait、重放动作。
 
 服务以前台进程运行，由单一 Runtime 监督。协调器本身通过固定 Git 导出引导；替换协调器前须停止受管工作负载。第三方官方 daemon 通过显式 external 声明保留官方管理 API。调用方提供唯一服务启动器以及声明版本递增规则。
 

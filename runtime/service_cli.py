@@ -19,7 +19,7 @@ from .prepare import canonical,digest,prepare,init_root,directory
 from .kernel import proc,same_identity,publish,private_fd,read_json
 from .native import boot_id
 from .registry import node_config,services_here,declaration
-from experimental.file_owner import protocol as C
+from .file_owner import protocol as C
 
 
 def config_path(explicit=None):
@@ -227,7 +227,7 @@ def main(argv=None):
             owner=RegistryOwner(c,path)
             try:
                 # Confirm the coordinator independently of workload preparation.
-                from experimental.file_owner.owner import Owner
+                from .file_owner.owner import Owner
                 Owner.round(owner)
                 while not stopped:owner.round();time.sleep(.05)
             finally:owner.close()
