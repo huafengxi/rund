@@ -40,6 +40,9 @@ def check(value, node):
         for key in ('status', 'stop_cmd'):
             if key in item: profile[key] = item[key]
         validate_profile(profile)
+        if item.get('external'):
+            require('status' in item and 'stop_cmd' in item,
+                    'external requires an official probe and stop command')
     return value
 
 
@@ -87,6 +90,8 @@ def selected(c, *, accept=False):
             before['declaration']['spec']['desired'] = 'online'
             after['declaration']['spec']['desired'] = 'online'
             old_version = before['declaration']['metadata']['version']
+            require(before.get('external', False) == after.get('external', False),
+                    'service manager kind cannot change: ' + key)
             new_version = after['declaration']['metadata']['version']
             require(new_version >= old_version, 'service version rollback refused: ' + key)
             require(before == after or new_version > old_version, 'changed service requires version bump: ' + key)

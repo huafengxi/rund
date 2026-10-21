@@ -175,8 +175,20 @@ def rows(c):
         elif name in c.get('external',[]) or svc.get('external'):
             # Existing generic probe helpers, with no legacy start/stop/reconcile.
             from .probes import online
-            ok,note=online(svc,c);actual='online' if ok else 'offline'
+            if svc.get('external'):
+                from .external import probe
+                ok,note=probe(svc,c)
+            else:ok,note=online(svc,c)
+            actual='online' if ok else 'offline'
             version=svc['version'] if ok else None
+            if svc.get('external'):
+                from .external import state
+                head=state(c['root'],name)
+                version=head['binding']['version'] if ok and head and head.get('binding') else None
+                if head and head.get('request'):
+                    record=read_json(Path(c['root'])/'external'/name/(head['request']+'.json'))
+                    if record['status']!='done' or not record['confirmed']:
+                        actual='unknown';note='unconfirmed official action: '+head['request']
         else:
             head=next((h for h in snapshot['services'] if h['id']=='svc-'+name),None)
             run=next((r for r in snapshot['runs'] if head and r['kind']=='Service' and r['id']==head['id'] and r['generation']==head['generation']),None)

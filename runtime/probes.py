@@ -8,7 +8,7 @@ import urllib.request
 from .registry import expand
 
 
-def online(service,config):
+def online(service,config,env=None):
     probe=service.get('status')
     if probe is None:return True,''
     if 'http' in probe:
@@ -20,8 +20,9 @@ def online(service,config):
             return True,url
         except urllib.error.HTTPError:return True,url
         except (OSError,ValueError):return False,'HTTP probe unavailable'
-    env={key:os.environ[key] for key in config.get('inheritEnv',[]) if key in os.environ}
-    env.update(HOME=config['home'],PATH=config['path'])
+    if env is None:
+        env={key:os.environ[key] for key in config.get('inheritEnv',[]) if key in os.environ}
+        env.update(HOME=config['home'],PATH=config['path'])
     try:
         result=subprocess.run([expand(a,config) for a in probe['cmd']],cwd=config['workspace'],env=env,
                               stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,timeout=10)

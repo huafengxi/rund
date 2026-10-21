@@ -152,11 +152,12 @@ def declaration(c,svc):
 class RegistryOwner(Owner):
     def __init__(self,config,path=None):
         self.config_path=Path(path).resolve() if path else None
-        self.config=config;self.registry_errors=[];self.next_registry=0
+        self.config=config;self.registry_errors=[];self.external_status=[];self.next_registry=0
         super().__init__(config['root'],config['protocol'],config['node'])
 
     def reconcile_registry(self):
         self.registry_errors=[]
+        self.external_status=[]
         if self.config_path:
             latest=node_config(self.config_path)
             require(all(latest[k]==self.config[k] for k in ('node','root','protocol','workspace','python','home')),'live node identity/context root changed')
@@ -171,7 +172,17 @@ class RegistryOwner(Owner):
         else:services=services_here(self.config)
         for svc in services:
             key=svc['name']
-            if key==self.config.get('bootstrapService','service-sync') or key in self.config.get('external',[]) or svc.get('external'):continue
+            if key==self.config.get('bootstrapService','service-sync') or key in self.config.get('external',[]):continue
+            if svc.get('external'):
+                try:
+                    from .external import reconcile
+                    fact=reconcile(self,svc)
+                    fact['actual']='online' if fact['online'] else 'offline'
+                    self.external_status.append(fact)
+                except (OSError,ValueError,KeyError,TypeError) as error:
+                    self.registry_errors.append(key+': '+str(error))
+                    self.external_status.append(dict(name=key,actual='unknown',reason=str(error)))
+                continue
             id='svc-'+key
             if ('Service',id) in blocked:continue
             try:
@@ -217,6 +228,11 @@ class RegistryOwner(Owner):
             except (OSError,ValueError,KeyError,TypeError) as error:self.registry_errors=[str(error)]
             self.next_registry=time.monotonic()+self.config.get('interval',60)
         value=super().round(batch)
+        value['externalServices']=self.external_status
+        for fact in self.external_status:
+            if fact['actual']=='unknown':
+                target=('Service','svc-'+fact['name'])
+                if target not in map(tuple,value['blockedTargets']):value['blockedTargets'].append(target)
         value['diagnostics'].extend(self.registry_errors)
         if 'registryFile' in self.config:
             accepted=self.runtime.root/'registry-accepted.json'

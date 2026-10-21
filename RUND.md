@@ -69,6 +69,31 @@ The CLI refuses worker-side managed start/stop: publish at the controller. `sync
 in this mode is a read-only confirmation; the Owner consumes on its interval.
 `status` includes registry diagnostics and blocked targets as well as actual rows.
 
+### Official external managers
+
+An external record requires `status` and `stop_cmd`. Its start argv, execution
+context, credentials and fixed sources come from the complete declaration.
+Readiness commands run in the declared context. The Owner uses the official
+manager exclusively; the daemon never enters the Runtime process/wait graph.
+An already-online daemon is adopted as an explicitly marked probe baseline.
+External `version` identifies the applied manager binding, not a measured
+daemon binary version; `adopted` distinguishes that baseline from a successful
+manager action. A changed binding prepares its replacement before stopping the
+old binding, then starts the replacement through its official manager.
+
+Each effect first persists `external/<name>/manager-<sequence>.json` and a head
+reference. Completion records the real manager exit and matching readiness
+probe. `managerWaitObserved` concerns the manager command only. A pending,
+timed-out, failed or unconfirmed action retains its exact identity and blocks
+automatic replay, even after an Owner restart or a newer desired publication.
+Completed receipts recover an interrupted head projection without another
+effect. Operators must inspect and resolve unknown official-manager outcomes;
+probe success alone cannot complete an interrupted receipt. Publication deletion
+uses the retained binding's stop command. Manager-kind changes are rejected.
+Snapshots expose `externalServices`; unknown external outcomes also appear in
+diagnostics and blocked targets. No manager output or credential values are
+copied to receipts.
+
 ## Fixed remote sources
 
 Source `repository` may be canonical local `file:///`, absolute `ssh://` or
