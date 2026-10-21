@@ -1,4 +1,6 @@
-"""File-only Git object preparation. No checkout, transport or payload execution.
+"""Pinned Git preparation: bounded source fetch and verified file-only export.
+
+No checkout or payload execution occurs during preparation.
 
 The caller owns the node root and source repository; concurrent cooperating
 preparers are supported, hostile same-uid writers racing filesystem checks are
