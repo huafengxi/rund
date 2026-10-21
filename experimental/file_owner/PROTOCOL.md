@@ -1,10 +1,12 @@
 # Local file owner alpha — csusii
 
-Unstable, Linux cooperative foreground sandbox only. Explicit `python -B -m
+The production `RegistryOwner` extends this file Owner; see
+[RUND.md](../../RUND.md) for the integrated contract. This page documents the
+restricted standalone fixture interface. Explicit `python -B -m
 experimental.file_owner owner --root ABS --protocol ABS --node NAME` starts one
-foreground process with one original Runtime/Kernel/node flock. No deployment,
-legacy/default CLI import, RPC, socket, network, scheduler or recovery worker.
-The owner remains until explicitly terminated, independently of clients.
+foreground process with one Runtime/Kernel/node flock, without installing
+transport or deployment. The owner remains until explicitly terminated,
+independently of clients.
 
 ## Files and admission
 
@@ -108,7 +110,7 @@ returns exact original record or null; `snapshot --protocol ABS` reads projectio
 Neither read starts/recovers a workload. Unknown status/observe/start/control
 is rejected before Runtime's directory-creating convenience readers are called;
 status never allocates an unknown run. All invocations must select the candidate
-explicitly via PYTHONPATH; this is not wired into runtime.cli or serviced.
+explicitly via PYTHONPATH for standalone fixtures; production uses `rund.py`.
 
 ## Single-owner authority graph
 

@@ -1,8 +1,11 @@
 # Recovery provenance — task rd6-s-175748
 
-This is a standalone **source candidate**, not a deployment. No production
-profile, startup path, service-sync activation, scheduler policy or Task
-supervision is changed. The production gate stays closed.
+This directory records a fixed historical source recovery, not the current
+Runtime contract. Its path maps, dependency pins, scripts and results describe
+that historical tree. Reproduction requires an independent checkout at
+`5ff16a47ab9334f3a272b89f3908ddedd113637d`, not the current branch. Current
+entrypoints and tests are described in [README.md](../README.md) and
+[RUND.md](../RUND.md).
 
 ## Identity and projection
 

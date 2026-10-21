@@ -5,7 +5,6 @@ Run with the desired Python: /absolute/python -B /checkout/runtime/test_prepare.
 RUND_TEST_OUTPUT may name a new independent artifact directory.
 """
 import copy
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -562,17 +561,6 @@ sys.exit(main(['prepare','--declaration',sys.argv[1],'--root',sys.argv[2]]))
             self.assertTrue(Path(identity['path']).is_absolute())
             self.assertEqual(len(identity['sha256']), 64)
             self.assertTrue(identity['version'])
-
-    def test_legacy_loader_rejects_experiment(self):
-        if not os.environ.get('AGENTD_DIR'):
-            self.skipTest('legacy loader requires caller-provided fixed agentd dependency; preparation has no agentd dependency')
-        spec = importlib.util.spec_from_file_location('legacy_serviced', REPO / 'serviced.py')
-        legacy = importlib.util.module_from_spec(spec); spec.loader.exec_module(legacy)
-        profiles = self.area / 'profiles'; profiles.mkdir()
-        (profiles / 'demo.json').write_text(json.dumps(self.service))
-        with self.assertRaises(SystemExit) as e:
-            legacy.load_profiles(str(profiles))
-        self.assertIn('unknown', str(e.exception))
 
 
 if __name__ == '__main__':

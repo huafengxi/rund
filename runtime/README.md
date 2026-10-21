@@ -1,13 +1,14 @@
-# rund preparation + Linux lifecycle experiment — opt-in, not production
+# Preparation fixture contract
 
-This directory is a **non-stable sandbox contract**, `rund/v1alpha1`.
-Nothing imports it from `serviced.py` or `sync-loop.sh`. It does not change the
-legacy registry or its fixed agentd dependency. `validate`/`prepare` never start
-payloads. P2b adds explicitly called **Linux foreground synthetic** execution;
-see [LIFECYCLE.md](LIFECYCLE.md) for its separate restricted contract and CLI.
-There is no daemon, automatic reconcile, adapter, deployment or production
-activation. Invoke explicitly with Python 3 on POSIX (`flock` and
-`O_NOFOLLOW` are required); testing is Linux only.
+The production coordinator and its supported declaration extensions are defined
+in [RUND.md](../RUND.md). `rund.py` uses the modules in this directory through
+`runtime.service_cli`; registry conversion and reconciliation live in
+`runtime.registry`, execution in `runtime.lifecycle` and `runtime.kernel`.
+
+The remainder of this page describes the restricted local-source preparation
+fixture subset, `rund/v1alpha1`, not the complete production feature set.
+`validate`/`prepare` never start payloads. The separate explicit lifecycle CLI
+and isolated fixture contract are documented in [LIFECYCLE.md](LIFECYCLE.md).
 No third-party Python packages, agentd checkout or complete workspace is needed
 for preparation.
 
@@ -219,12 +220,11 @@ after the first imported blob, then SIGKILLs it; no production fault-injection
 flag or daemon is provided. chmod permission testing is explicitly skipped
 under uid 0, never represented as a passed permission failure.
 
-Preparation tests have no agentd dependency. The extra legacy-loader rejection
-test requires `AGENTD_DIR` to point to the repository's **unchanged pinned**
-dependency; without it that one test explicitly skips. Legacy tests remain at
-the repository root and use their existing agentd/Bash3.2 input contracts.
-No legacy test, source, recovery mapping, dependency pin, service profile,
-Makefile/caller or startup path is changed by this experiment.
+Preparation tests have no agentd dependency. Current caller-registry and
+credential-loader unit tests live at the repository root; run
+`python -B -m unittest test_registry test_env_loader -v`. Historical recovery
+fixtures and their fixed dependencies are described in
+[recovery/README.md](../recovery/README.md).
 
 ## Explicit execution and next boundary
 

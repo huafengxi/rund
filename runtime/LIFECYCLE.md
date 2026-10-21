@@ -1,12 +1,10 @@
-# Shared native foreground lifecycle (P2b 68wblg; Service always 832kxv)
+# Shared native foreground lifecycle
 
-**Experimental, unstable API; not a production runtime/P3 or deployment PASS.**
-Based on nf2q61/design §4–7, following P2a prepare. Nothing imports this from
-`serviced.py`, `sync-loop.sh` or another legacy entry. No service/profile/caller,
-agent adapter, scheduler, protocol, recovery mapping or fixed S→A0 dependency is
-changed. There is no background coordinator, watcher, daemon, automatic startup,
-network transport, distributed takeover or new orchestration platform. Every action
-below is an explicit call. No model or production socket is involved.
+The production Owner uses `runtime.lifecycle` and `runtime.kernel`; its
+coordination and deployment-facing contract is [RUND.md](../RUND.md). This page
+describes explicit Runtime calls and isolated foreground fixtures. The finite
+CLI below does not install a background coordinator or transport, and its test
+results alone do not establish production deployment success.
 
 ## Supported execution contract
 
@@ -195,7 +193,7 @@ and failing local test artifacts are retained for timing/identity diagnosis.
 
 ## Explicit CLI and API
 
-Only the new CLI imports lifecycle modules, and only for `execute`:
+The standalone finite-operation CLI imports lifecycle modules for `execute`:
 
 ```sh
 PYTHONPATH=/absolute/candidate /absolute/python -B -m runtime.cli execute \
@@ -240,7 +238,7 @@ the foreground fixture while CLI retains its real Popen handle.
 ```sh
 RUND_LIFECYCLE_OUTPUT='/absolute/new artifacts' \
   /absolute/python -B /absolute/candidate/runtime/test_lifecycle.py
-# P2a unchanged; see README for AGENTD_DIR and legacy Bash3.2 dependencies.
+# Preparation fixtures need no agentd checkout or Bash3.2.
 RUND_TEST_OUTPUT='/absolute/another new artifacts' \
   /absolute/python -B /absolute/candidate/runtime/test_prepare.py
 ```

@@ -87,4 +87,15 @@ while True:time.sleep(.01)
   second=json.loads(self.cli('start','service-sync').stdout);self.assertNotEqual(first['pid'],second['pid']);self.assertGreater(second['startedAt'],first['startedAt'])
   self.assertEqual(json.loads(self.cli('status','--machine').stdout)['drift'],0)
 
+class EntrypointTests(unittest.TestCase):
+ def test_entrypoint_without_legacy_file_or_agentd_dependency(self):
+  area=BASE/'entrypoint-without-legacy';area.mkdir()
+  self.assertFalse((S/'serviced.py').exists())
+  env=dict(os.environ,AGENTD_DIR=str(area/'missing-agentd'),PLATFORM_WORKSPACE=str(area),PYTHONDONTWRITEBYTECODE='1')
+  p=subprocess.run([sys.executable,'-B',str(S/'rund.py'),'--help'],cwd=area,env=env,capture_output=True,text=True,timeout=5)
+  (area/'command.json').write_text(json.dumps(dict(rc=p.returncode,stdout=p.stdout,stderr=p.stderr),indent=2))
+  self.assertEqual(p.returncode,0,p.stderr)
+  self.assertIn('owner',p.stdout)
+  self.assertEqual(sorted(p.name for p in area.iterdir()),['command.json'])
+
 if __name__=='__main__':unittest.main(verbosity=2)
