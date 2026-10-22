@@ -103,13 +103,15 @@ def service(c,selector,action):
     found=[d for _,d in objects(c['sharedRoot']).values() if d['kind']=='Service' and
            d['node']==c['node'] and selector in (d['id'],d.get('name'))]
     require(len(found)==1,'local service selector not unique');d=found[0]
-    set_desired(c,d['id'],'online' if action=='start' else 'offline');refresh(c)
+    wanted='online' if action=='start' else 'offline'
+    expected=set_desired(c,d['id'],wanted);refresh(c)
     end=time.monotonic()+120
     while time.monotonic()<end:
         row=next(s for s in status(c)['services'] if s.get('id')==d['id'])
-        _,state=get(c['sharedRoot'],d['id'])
+        observed,state=get(c['sharedRoot'],d['id'])
         closed=not state or not state.get('currentTask') or (get(c['sharedRoot'],state['currentTask'])[1] or {}).get('phase') in FINAL
-        if row['actual']==row['desired'] and row['state']=='ok' and (action=='start' or closed):
+        received=observed['revision']>=expected['revision'] and observed['desired']==wanted
+        if received and row['actual']==wanted and row['state']=='ok' and (action=='start' or closed):
             if action=='stop':refresh(c)
             return row
         time.sleep(.3)

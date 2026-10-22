@@ -38,4 +38,21 @@ class CLI(unittest.TestCase):
         while read(self.root/'tasks/waiting/state.json')['phase']!='canceled' and time.monotonic()<end:time.sleep(.02)
         self.assertEqual(read(self.root/'tasks/waiting/state.json')['phase'],'canceled')
 
+class RoutedDesired(unittest.TestCase):
+    def test_stale_offline_replica_cannot_complete_start(self):
+        from unittest.mock import patch
+        from runtime import cli
+        old=dict(kind='Service',id='demo',name='demo',node='target',publisher='operator',revision=1,desired='offline',version=1)
+        new=dict(old,revision=2,desired='online')
+        rows=[{'services':[dict(id='demo',actual='offline',desired='offline',state='ok')]},
+              {'services':[dict(id='demo',actual='online',desired='online',state='ok')]}]
+        with patch.object(cli,'objects',return_value={'demo':(None,old)}), \
+             patch.object(cli,'set_desired',return_value=new), \
+             patch.object(cli,'refresh'),patch.object(cli.time,'sleep'), \
+             patch.object(cli,'status',side_effect=rows) as status, \
+             patch.object(cli,'get',side_effect=[(old,{'currentTask':None}),(new,{'currentTask':None})]):
+            result=cli.service({'node':'target','sharedRoot':'fixture'},'demo','start')
+        self.assertEqual(status.call_count,2)
+        self.assertEqual(result['actual'],'online')
+
 if __name__=='__main__':unittest.main()
