@@ -1,11 +1,12 @@
 """Object declaration contract. Paths organize files; kind and id define objects."""
 import copy
+import os
 import re
 from pathlib import Path
 from .store import read,require,digest
 
 FINAL=frozenset(('succeeded','failed','canceled'))
-EXEC_KEYS=frozenset(('argv','needs','cwd','env'))
+EXEC_KEYS=frozenset(('argv','needs','cwd','env','resources'))
 COMMON=frozenset(('kind','id','name','publisher','node','revision'))
 
 def name(v):require(isinstance(v,str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,159}',v),'invalid object identity')
@@ -16,6 +17,10 @@ def execution(e):
     for x in e['argv']:text(x)
     require(isinstance(e.get('needs',[]),list),'needs must be file paths')
     for p in e.get('needs',[]):text(p)
+    if 'resources' in e:
+        require(isinstance(e['resources'],list),'resources must be an array')
+        for resource in e['resources']:text(resource)
+        require(len(set(e['resources']))==len(e['resources']),'duplicate resource')
     if 'cwd' in e:text(e['cwd'])
     require(isinstance(e.get('env',{}),dict),'env object required')
     for k,v in e.get('env',{}).items():
@@ -74,11 +79,18 @@ def node_config(path):
     for k in ('sharedRoot','privateRoot','python','home'):require(Path(c[k]).is_absolute(),'absolute '+k+' required')
     a,b=Path(c['sharedRoot']),Path(c['privateRoot']);require(a!=b and a not in b.parents and b not in a.parents,'shared/private roots overlap')
     require(c['publishers'].get('owner-'+c['node'])==c['node'],'node owner publisher required')
+    if 'scheduler' in c:
+        s=c['scheduler'];require(isinstance(s,dict),'scheduler object required');name(s['node'])
+        require(type(s.get('maxConcurrent',4)) is int and s.get('maxConcurrent',4)>0,'positive maxConcurrent required')
     return c
 
 def discover(root):
     result={};errors=[]
-    for p in sorted(Path(root).rglob('declaration.json')):
+    paths=[]
+    for folder,dirs,files in os.walk(root):
+        if Path(folder)==Path(root):dirs[:]=[d for d in dirs if d not in ('agents','configs','gc','scheduling')]
+        if 'declaration.json' in files:paths.append(Path(folder)/'declaration.json')
+    for p in sorted(paths):
         try:
             d=validate(read(p));require(d['id'] not in result,'duplicate object identity: '+d['id']);result[d['id']]=(p,d)
         except (ValueError,OSError,KeyError,TypeError) as e:errors.append(str(p)+': '+str(e))

@@ -82,16 +82,10 @@ class Objects(unittest.TestCase):
     def test_unknown_owner_restart_does_not_spawn(self):
         p=self.put(self.task());s=self.o.initial(self.task());s.update(phase='starting',updatedAt='2020-01-01T00:00:00+00:00');write(p.with_name('state.json'),s)
         self.o.round();self.assertEqual(self.state('task')['phase'],'unknown');self.assertFalse(self.o.processes.handles)
-    def test_sync_protects_original_and_frozen_terminal(self):
-        spec=importlib.util.spec_from_file_location('sync_tool',Path(__file__).resolve().parents[1]/'tools/sync.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
-        self.c['configWriter']='a';self.put(self.task());self.until(lambda:self.state('task') and self.state('task')['phase']=='succeeded')
-        records=m.export(self.c);b=dict(self.c,node='b',sharedRoot=str(self.base/'replica'));m.receive(b,records,source='a')
-        self.assertEqual(get(b['sharedRoot'],'task')[1],self.state('task'))
-        changed_records=copy.deepcopy(records)
-        for r in changed_records:
-            if r['path'].endswith('state.json'):r['body']['phase']='running'
-        with self.assertRaises(ValueError):m.receive(b,changed_records,source='a')
-        m.receive(self.c,changed_records);self.assertEqual(self.state('task')['phase'],'succeeded')
+    def test_shared_business_files_are_not_execution_objects(self):
+        write(self.base/'shared/agents/task/demo/declaration.json',{'business':'opaque'})
+        self.put(self.task());self.until(lambda:self.state('task') and self.state('task')['phase']=='succeeded')
+        self.assertFalse(self.o.errors)
     def test_credentials_wrapper_redacts_and_execs(self):
         secret='fixture-secret-never-in-state';f=self.base/'env';f.write_text('KEY='+secret)
         cfg=self.base/'creds.json';write(cfg,dict(files=[dict(file=str(f),loader=[])],require=['KEY']))

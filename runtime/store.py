@@ -34,7 +34,8 @@ def write(p,value):
         require(not p.is_symlink(),'symlink output refused')
         if p.read_bytes()==data:return
     t=p.with_name('.write-'+uuid.uuid4().hex)
-    with t.open('xb') as f:f.write(data);f.flush();os.fsync(f.fileno())
+    with t.open('xb') as f:
+        os.fchown(f.fileno(),-1,os.getgid());f.write(data);f.flush();os.fsync(f.fileno())
     t.chmod(0o600);os.replace(t,p)
     fd=os.open(p.parent,os.O_RDONLY)
     try:os.fsync(fd)
