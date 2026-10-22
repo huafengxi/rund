@@ -14,11 +14,72 @@ Service 是持续监督对象；每次执行均为独立 Task。Task 是唯一�
 
 公共必需字段：kind、id、publisher、node、revision。可选 name 用于显示，不决定身份。
 
+| 字段 | 类型与含义 |
+| --- | --- |
+| kind | `Service` 或 `Task` |
+| id | 全局唯一身份；与 publisher、node 一经发布不可修改 |
+| publisher | 声明发布者，由节点配置 publishers 映射到唯一写入节点 |
+| node | 唯一执行节点，也是状态写入节点 |
+| revision | 正整数；内容变化必须递增，同 revision 只接受完全相同的正文 |
+| name | 可选非空显示名；Service 的本机 CLI 可按 name 或 id 选择 |
+
 Task 必需 desired、argv；可选 needs、cwd、env、resources、cancelMode、service。desired 为 run/cancel，仅允许 run 转 cancel；除 revision、desired、取消模式外的执行定义发布后不可变。取消发布后模式固定。needs 为本机文件路径，全部在场才启动；缺失时等待，取消不等待依赖。argv 无 shell。cwd 默认任务工作目录，环境从显式节点 HOME/PATH 与声明 env 构造，不继承调用者身份。service 引用生成它的 Service id、version、declarationDigest。
 
 Service 必需 version、desired、restart、task；可选 probe。desired 为 online/offline；restart 为 manual/on-failure/always；task 是 argv、needs、cwd、env、resources 模板。修改模板、策略或探针须提高 version。每次启动复制模板生成新 Task；原 Task 状态未知或负载未收口时阻塞替代执行。offline 取消当前 Task 并停止后续创建。
 
+| 执行字段 | 约束与默认值 |
+| --- | --- |
+| argv | 必需的非空字符串数组；直接执行，不经过 shell |
+| needs | 文件路径数组，默认 `[]`；目标节点逐项检查普通文件存在 |
+| cwd | 可选工作目录，默认 `${work}` |
+| env | 字符串映射，默认 `{}`；覆盖显式基础环境，不继承 CLI 环境 |
+| resources | 可选全局资源数组；省略表示独立执行，`[]` 表示只占并发名额 |
+
+Task 的 cancelMode 默认为 terminate，先 TERM，等待约三秒后 KILL；kill 直接请求 KILL。取消已经发布时，再次取消不改变模式。service 为 Owner 生成的父 Service 引用，包含 id、version、declarationDigest。
+
+Service 的 version 为正整数，独立于 revision；单纯启停只改变 desired 和 revision。manual 在本次运行终结后保持停止；on-failure 只对 failed 自动重试；always 对任意终态重试。自动重试采用指数退避，当前范围为 0.5 至 30 秒。探针只用于 CLI 状态检查，不触发 Owner 自动重启：HTTP 探针检查请求可达（包括 HTTP 错误响应），命令探针要求退出码 0 且 stdout 包含 expect（默认空串）。probe 使用 `{http,timeout?}` 或 `{cmd,expect?,timeout?}`，两类互斥。
+
 路径占位符：${shared}、${private}、${artifacts}、${work}、${runtime}。needs 不引用其他 Task 身份。产物准备程序在独立 Task 中执行，完整产物原子发布后最后发布完成文件；成功发布的产物不可变，被引用期间不得清理。
+
+占位符在 argv、needs、cwd、env 值中展开；`~` 和 `~/` 使用节点 home。基础环境包含 HOME、PATH、LC_ALL、TMPDIR、PYTHONDONTWRITEBYTECODE。`${work}` 和 TMPDIR 属于当前 Task 私有目录。
+
+以下为独立 Task 与 Service 的声明示例；node 与 publisher 由调用方配置映射：
+
+```json
+{
+  "kind": "Task",
+  "id": "example-task",
+  "publisher": "operator",
+  "node": "node-a",
+  "revision": 1,
+  "desired": "run",
+  "argv": ["/usr/bin/true"],
+  "needs": ["${artifacts}/example/ready.json"],
+  "cwd": "${work}",
+  "env": {},
+  "resources": ["example-repository"]
+}
+```
+
+```json
+{
+  "kind": "Service",
+  "id": "example-service",
+  "name": "example",
+  "publisher": "operator",
+  "node": "node-a",
+  "revision": 1,
+  "version": 1,
+  "desired": "online",
+  "restart": "on-failure",
+  "task": {
+    "argv": ["/bin/sleep", "3600"],
+    "needs": [],
+    "cwd": "${work}",
+    "env": {}
+  }
+}
+```
 
 ## 状态
 
@@ -28,6 +89,25 @@ Task 状态另含 process、startedAt、finishedAt、exitCode、signal、waitObs
 
 Service 状态另含 currentTask、nextStartAt、restartCount；nextStartAt 为 Unix 秒或 null。阶段为 stopped、starting、running、stopping、backoff、blocked。进程事实只存在关联 Task；currentTask 可在终态后保留。
 
+| 状态字段 | 含义 |
+| --- | --- |
+| kind / id / node | 对应对象身份与执行节点 |
+| declarationDigest | 已接受声明的规范 JSON 摘要；终态 Task 保留最后冻结值 |
+| updatedAt / reason | 最近持久化时间与原因；时间为带时区 ISO 字符串 |
+| Task.process | 未 spawn 为 null；启动后包含 pid、start、boot、uid、pgid、sid |
+| Task.startedAt / finishedAt | 启动与终结时间，未发生时为 null |
+| Task.exitCode / signal | 正常退出码或终止信号；未知时为 null |
+| Task.waitObserved | 是否取得本 Owner 持有的真实 wait 结果，初始 false |
+| Task.queuedAt | 进入全局队列的时间，按需出现 |
+| Task.observedAt | 持续运行观测时间，按需出现 |
+| Task.cancelRequested | 已实际发送取消信号时置 true，按需出现 |
+| Task.stopStep / stopDeadline | 取消阶段（1=TERM、2=KILL）与 Unix 秒截止时间，按需出现 |
+| Service.currentTask | 当前或最近一次子 Task id，初始 null |
+| Service.nextStartAt | 自动重试截止时间，初始 null |
+| Service.restartCount | 自动重试计数，初始 0 |
+
+Task 的常见路径为 `accepted → preparing → queued → starting → running → succeeded/failed`；文件齐备或无需全局放行时跳过相应阶段。accepted 也是初始内存状态，不保证单独持久化。取消可在 spawn 前直接进入 canceled，或经 canceling 在真实 wait 和组收口后终结。unknown 表示事实不充分，不等同 failed。Service.phase=running 只表示关联 Task 正在运行，CLI 的 online/ok 还会检查进程身份、版本及探针。
+
 每次更新原子替换整份文件。Owner 重启读取已接受声明及原状态，starting/unknown 不自动重放 spawn。Owner 自身在受管图外，替换前收口全部 Task。
 
 ## 配置与凭据
@@ -36,11 +116,29 @@ Service 状态另含 currentTask、nextStartAt、restartCount；nextStartAt 为 
 
 ## Bootstrap
 
-安装固定 runtime、同步工具和准备工具，写入本机配置与普通同步 Service；通过 servicectl owner start 启动图外 Owner。同步 Service 直接执行已安装工具，无业务源码依赖。后续发布准备 Task 与业务 Service；准备工具获取固定源码并发布本地产物，业务 Task 仅等待 needs 文件。工具、端点、发布者映射及密钥位置由调用方提供。
+调用方先提供固定 runtime 源码目录和同步工具、节点配置、同步配置、私有凭据引用及普通同步 Service 声明。tools/bootstrap.py 接收 --prefix、--node-config、--runtime-source、--revision，可用 --upgrade 允许已有安装根。它写 prefix/local/node.json（runtimeSource 指向传入目录）、创建共享根及私有 artifacts/locks/tasks、生成 bin/servicectl。revision 参数校验为固定 40 位小写 SHA；安装器不导出、复制或校验源码目录与该 SHA 的对应关系，固定源码由调用方保证。安装器也不生成同步配置和 Service 声明。
+
+通过 servicectl owner start 启动图外 Owner；配置 syncConfig 时先执行一次同步，失败则不启动 Owner。同步 Service 直接执行预先提供的固定工具，无业务源码依赖。后续发布准备 Task 与业务 Service；准备工具获取固定源码并发布本地产物，业务 Task 仅等待 needs 文件。工具、端点、发布者映射及密钥位置由调用方提供。
 
 ## 统一入口
 
 servicectl status [name/id] 查询；start/stop <Service> 修改原发布者 desired 并等待实际状态；cancel <Task> [--mode kill] 发布取消。publish --input <file> 由声明原发布者执行。owner start/stop 操作图外 Owner；owner run 是前台底座入口。Makefile 不是协议约束。客户端不能直接执行或发信号给受管负载，不能回写 state。远端修改经 SSH 路由到声明原发布者；目标机仅执行自己的对象。
+
+| 命令（全局支持 `--config <node.json>`） | 实际行为 |
+| --- | --- |
+| status | 本节点 Owner 与 Service 汇总；返回 node、total、drift、services、diagnostics、blockedTargets |
+| status <Service name/id> | 本节点单 Service 摘要：version、run_version、desired、actual、state、pid、task、note 等 |
+| status <Task id> | 返回共享树中的 declaration 和 state，可读取其他节点副本 |
+| start / stop <Service name/id> | 仅选择本机 Service；向原发布者修改 desired，触发同步，最多等待约 120 秒；stop 还等待子 Task 收口 |
+| cancel <Task id> [--mode terminate\|kill] | 发布取消意图，返回声明，不等待终态 |
+| publish --input <file\|-> | 本机作为原发布者校验并发布声明；`-` 读取 stdin；输出声明路径 |
+| desired <id> <value> [--mode terminate\|kill] | 底层声明意图接口；可路由原发布者，不等待实际执行 |
+| sync | 配置 syncConfig 时执行一次 push/pull；未配置时无操作 |
+| owner start / stop / run | 幂等启动、检查 Task 已终结后停止、前台运行 Owner |
+
+start/stop 超时表示意图已发布而执行仍待完成，不能据此认定声明回滚。跨节点启停应在目标节点运行 CLI；原发布者路由使用 publishers 中的节点名作为 SSH 目标。status 不主动同步，其副本新鲜度由同步链路决定。
+
+start 是设置 online 的幂等操作，不承诺创建新一代；需要显式重启时顺序执行 stop、start。Service 子 Task 的 resources 在模板中指定，遵循与独立 Task 相同的放行语义。
 
 node.json 是本机公共配置权威；普通同步配置通过 nodeConfig 引用它，只保存运输字段。Owner 身份和诊断同在 owner.json，已接受声明在 accepted.json。源码准备计划只描述固定 sources，不复用执行声明；Git 缓存与最终 artifacts 之间没有第二套代码或 manifest 目录。
 
