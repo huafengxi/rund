@@ -17,7 +17,7 @@ def install(prefix,config,source,revision,upgrade=False):
     directory(prefix);target=prefix/'local/node.json';write(target,dict(config,runtimeSource=str(source)));c=node_config(target)
     for p in (c['sharedRoot'],c['privateRoot']):directory(p)
     for rel in ('artifacts','locks','tasks'):directory(Path(c['privateRoot'])/rel)
-    script='#!'+c['python']+'\nimport json,sys\nfrom pathlib import Path\nconfig=Path(__file__).resolve().parents[1]/"local/node.json"\nc=json.loads(config.read_text());sys.path.insert(0,c["runtimeSource"])\nfrom runtime.cli import main\nraise SystemExit(main(default_config=config))\n'
+    script='#!'+c['python']+'\nimport json,sys\nsys.dont_write_bytecode=True\nfrom pathlib import Path\nconfig=Path(__file__).resolve().parents[1]/"local/node.json"\nc=json.loads(config.read_text());sys.path.insert(0,c["runtimeSource"])\nfrom runtime.cli import main\nraise SystemExit(main(default_config=config))\n'
     entry=directory(prefix/'bin')/'servicectl';entry.write_text(script);entry.chmod(0o700)
 
 if __name__=='__main__':
