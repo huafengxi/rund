@@ -8,4 +8,4 @@ runtime/config.py 定义声明；store.py 提供原子持久化；protocol.py �
 
 tools/prepare.py、tools/env_exec.py、tools/sync.py 和 tools/external_exec.py 是普通 Task 的负载，分别完成固定源码准备、内存凭据注入、单写者运输和官方管理器适配。Owner 不获取源码或解密凭据。源码准备复用独立的 Git object export 实现，其历史夹具合同不是 Owner 执行合同。
 
-机制测试使用 Python 标准库 unittest，入口 `python -B -m unittest discover -s tests -v`。测试创建自己的进程、仓与目录；真实五机安装及服务验证由调用方完成。recovery/ 保存固定历史来源，不是当前部署入口。
+机制测试使用 Python 标准库 unittest，入口 `python -B -m unittest discover -s tests -v`。测试创建自己的进程、仓与目录；真实五机安装及服务验证由调用方完成。历史变更由 Git 保存。
