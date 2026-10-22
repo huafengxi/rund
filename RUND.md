@@ -24,9 +24,9 @@ Service 必需 version、desired、restart、task；可选 probe。desired 为 o
 
 公共字段：kind、id、node、declarationDigest、updatedAt、phase、reason。摘要对应已接受声明，时间仅作观测说明。
 
-Task 状态另含 process、startedAt、finishedAt、exitCode、signal、waitObserved；process 保留原生 boot/start/pid/uid/pgid/session 身份。阶段为 accepted、preparing、starting、running、canceling、unknown、succeeded、failed、canceled。后三者为终态，整份 state.json 冻结。取消记录必要的信号阶段和截止时间；只有真实 wait 和组收口后才能完成已启动 Task。启动前失败或取消可无进程、无 wait；未知身份或旧 Owner 丢失 wait 不伪造终态。
+Task 状态另含 process、startedAt、finishedAt、exitCode、signal、waitObserved；process 保留原生 boot、start、pid、uid、pgid、sid 身份。阶段为 accepted、preparing、starting、running、canceling、unknown、succeeded、failed、canceled。后三者为终态，整份 state.json 冻结。取消记录必要的信号阶段和截止时间；只有真实 wait 和组收口后才能完成已启动 Task。启动前失败或取消可无进程、无 wait；未知身份或旧 Owner 丢失 wait 不伪造终态。
 
-Service 状态另含 currentTask、nextStartAt、restartCount。阶段为 stopped、starting、running、stopping、backoff、blocked。进程事实只存在关联 Task；currentTask 可在终态后保留。
+Service 状态另含 currentTask、nextStartAt、restartCount；nextStartAt 为 Unix 秒或 null。阶段为 stopped、starting、running、stopping、backoff、blocked。进程事实只存在关联 Task；currentTask 可在终态后保留。
 
 每次更新原子替换整份文件。Owner 重启读取已接受声明及原状态，starting/unknown 不自动重放 spawn。Owner 自身在受管图外，替换前收口全部 Task。
 
