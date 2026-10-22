@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from runtime.config import validate,changed,discover
+from runtime.config import validate,changed,discover,node_config
 from runtime.store import read,write,canonical,require
 
 
@@ -63,8 +63,13 @@ def transport(c,action,data=None):
     p=subprocess.run(argv,input=payload,capture_output=True,timeout=c.get('timeout',45));require(p.returncode==0,'sync peer failed: '+p.stderr.decode(errors='replace')[-1000:])
     return json.loads(gzip.decompress(p.stdout)) if action=='export' else None
 
+def sync_config(path):
+    link=read(path)
+    return dict(node_config(link['nodeConfig']),**{k:v for k,v in link.items() if k!='nodeConfig'})
+
+
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--config',required=True,type=Path);p.add_argument('action',choices=('watch','once','export','receive'));p.add_argument('--all',action='store_true');p.add_argument('--source');a=p.parse_args();c=read(a.config)
+    p=argparse.ArgumentParser();p.add_argument('--config',required=True,type=Path);p.add_argument('action',choices=('watch','once','export','receive'));p.add_argument('--all',action='store_true');p.add_argument('--source');a=p.parse_args();c=sync_config(a.config)
     if a.action=='export':sys.stdout.buffer.write(gzip.compress(canonical(export(c,all_origins=a.all))));return
     if a.action=='receive':receive(c,json.loads(gzip.decompress(sys.stdin.buffer.read())),source=a.source);return
     stopped=False

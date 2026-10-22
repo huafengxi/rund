@@ -14,7 +14,7 @@ def members(p):
     return [v for pid in ids if (v:=identity(pid)) and v['pgid']==p['pgid']]
 
 def expand(value,c,task):
-    mapping={'shared':c['sharedRoot'],'private':c['privateRoot'],'artifacts':str(Path(c['privateRoot'])/'artifacts'),'work':str(Path(c['privateRoot'])/'work'/task),'runtime':c.get('runtimeSource',str(Path(__file__).resolve().parents[1]))}
+    mapping={'shared':c['sharedRoot'],'private':c['privateRoot'],'artifacts':str(Path(c['privateRoot'])/'artifacts'),'work':str(Path(c['privateRoot'])/'tasks'/task/'work'),'runtime':c.get('runtimeSource',str(Path(__file__).resolve().parents[1]))}
     for k,v in mapping.items():value=value.replace('${'+k+'}',v)
     require('${' not in value,'unknown execution placeholder')
     return c['home']+value[1:] if value=='~' or value.startswith('~/') else value
@@ -22,7 +22,7 @@ def expand(value,c,task):
 class Processes:
     def __init__(self,c):self.c=c;self.handles={}
     def spawn(self,d):
-        c=self.c;tid=d['id'];work=directory(Path(c['privateRoot'])/'work'/tid);logs=directory(Path(c['privateRoot'])/'logs'/tid)
+        c=self.c;tid=d['id'];work=directory(Path(c['privateRoot'])/'tasks'/tid/'work');logs=directory(Path(c['privateRoot'])/'tasks'/tid)
         env=dict(HOME=c['home'],PATH=c['path'],LC_ALL='C.UTF-8',TMPDIR=str(directory(work/'tmp')),PYTHONDONTWRITEBYTECODE='1')
         env.update({k:expand(v,c,tid) for k,v in d.get('env',{}).items()})
         argv=[expand(x,c,tid) for x in d['argv']];cwd=expand(d.get('cwd','${work}'),c,tid)

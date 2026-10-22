@@ -22,12 +22,12 @@ class Tools(unittest.TestCase):
         b=Path(tempfile.mkdtemp(prefix='serviced-bad-prepare-')).resolve()
         with self.assertRaises((ValueError,OSError)):build({'sources':[]},b/'artifact',b/'cache')
         self.assertFalse((b/'artifact/ready.json').exists())
-    def test_bootstrap_empty_root_and_make_status(self):
+    def test_bootstrap_empty_root_and_servicectl_status(self):
         from tools.bootstrap import install
         b=Path(tempfile.mkdtemp(prefix='serviced-bootstrap-'));prefix=b/'node';source=Path(__file__).resolve().parents[1]
         c=dict(node='fixture',sharedRoot=str(prefix/'shared'),privateRoot=str(prefix/'local'),python=sys.executable,home=str(b),path=os.environ['PATH'],publishers={'owner-fixture':'fixture'},version=1)
         install(prefix,c,source,'a'*40)
-        p=subprocess.run(['make','--no-print-directory','-C',str(prefix),'serviced.status'],capture_output=True,text=True)
+        p=subprocess.run([str(prefix/'bin/servicectl'),'status'],capture_output=True,text=True)
         self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(json.loads(p.stdout)['services'][0]['actual'],'offline')
         with self.assertRaises(ValueError):install(prefix,c,source,'a'*40)
 

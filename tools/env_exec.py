@@ -2,12 +2,22 @@
 """Task payload wrapper: load caller-declared credentials in memory, then exec."""
 import argparse
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from runtime.store import read,require
-from tools.source_environment import parse_env
+def parse_env(content):
+    values={}
+    for line in content.splitlines():
+        match=re.match(r'^\s*(?:export\s+)?([A-Za-z_]\w*)\s*=(.*)$',line)
+        if not match:continue
+        key,value=match.groups();value=value.strip()
+        if len(value)>=2 and value[0]==value[-1] and value[0] in ('"',"'"):value=value[1:-1]
+        values[key]=value
+    return values
+
 
 
 def main():

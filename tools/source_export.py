@@ -9,21 +9,17 @@ not. Incomplete/unknown artifacts are retained, never automatically deleted.
 from contextlib import contextmanager
 import fcntl
 import hashlib
-import json
 import os
 from pathlib import Path
-import platform
 import shutil
 import shlex
 import stat
 import subprocess
-import sys
 import uuid
 
-from .source_contract import require, repository, relative, validate
+from .source_plan import require, repository, relative
 
-FORMAT = 'rund-prepare/v1alpha1-object-export-1'
-LAYOUT = ('cache', 'code', 'manifests', 'work', 'state', 'protocol')
+FORMAT = 'git-source-cache/v1'
 MAX_OBJECT = 32 * 1024 * 1024
 MAX_FILES = 10000
 MAX_BYTES = 128 * 1024 * 1024
@@ -93,32 +89,6 @@ def sync_dir(path):
         os.close(fd)
 
 
-def init_root(root):
-    root = Path(root)
-    require(root.is_absolute(), '--root must be absolute')
-    no_links(root)
-    # Only a new/empty root or our explicitly versioned root is accepted.
-    if root.exists():
-        require(root.is_dir(), 'root must be directory')
-        entries = set(p.name for p in root.iterdir())
-        require(not entries or '.rund-root.json' in entries or entries == {'.init.lock'}, 'refusing nonempty unmanaged root')
-    directory(root)
-    with lock(root / '.init.lock'):
-        # A cooperating initializer may have created the marker but not written
-        # it yet. Inspect its contents only under this stable initialization lock.
-        marker = root / '.rund-root.json'
-        if marker.exists() or marker.is_symlink():
-            require(read_regular(marker) == canonical({'format': FORMAT}), 'unrecognized node root')
-        else:
-            require(set(p.name for p in root.iterdir()) == {'.init.lock'}, 'refusing nonempty unmanaged root')
-            write_new(marker, canonical({'format': FORMAT}))
-        for name in LAYOUT:
-            directory(root / name)
-        for name in ('locks', 'staging', 'git-home'):
-            directory(root / 'state' / name)
-    return root
-
-
 def tool_identity(path):
     real = Path(path).resolve(strict=True)
     require(real.is_file() and os.access(real, os.X_OK), 'missing executable tool')
@@ -132,8 +102,8 @@ class Git:
         self.identity = tool_identity(git)
         self.path = self.identity['path']
         self.root = root
-        self.env = {'PATH': os.defpath, 'HOME': str(root / 'state/git-home'),
-                    'XDG_CONFIG_HOME': str(root / 'state/git-home'), 'LC_ALL': 'C',
+        self.env = {'PATH': os.defpath, 'HOME': str(root / 'git-home'),
+                    'XDG_CONFIG_HOME': str(root / 'git-home'), 'LC_ALL': 'C',
                     'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
                     'GIT_ATTR_NOSYSTEM': '1', 'GIT_TERMINAL_PROMPT': '0',
                     'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_CONFIG_COUNT': '0'}
@@ -169,7 +139,7 @@ class Git:
         cmd = [self.path, '--no-replace-objects', '-c', 'core.hooksPath=/dev/null',
                '-c', 'protocol.allow=never', '-c', 'protocol.' + protocol + '.allow=always',
                '--git-dir=' + str(db), 'fetch', '--no-tags', '--no-recurse-submodules',
-               '--', source['repository'], source['revision'] + ':refs/rund/pins/' + source['revision']]
+               '--', source['repository'], source['revision'] + ':refs/serviced/pins/' + source['revision']]
         try:
             p = subprocess.run(cmd, env=env, cwd=self.root, capture_output=True, timeout=120)
         except subprocess.TimeoutExpired as error:
@@ -181,21 +151,21 @@ class Git:
     def cache(self, source):
         uri = source.as_uri() if isinstance(source, Path) else source
         key = digest(str(source).encode())
-        db = self.root / 'cache' / key
+        db = self.root / 'git' / key
         if not db.exists():
-            staging = self.root / 'cache' / ('.' + key + '-' + uuid.uuid4().hex)
+            staging = self.root / 'git' / ('.' + key + '-' + uuid.uuid4().hex)
             directory(staging)
             self.run(['init', '--bare', '--template=', '--object-format=sha1', str(staging)])
             # Git adds filesystem-dependent defaults (e.g. APFS ignorecase).
             # Publish our exact private config before reading any source object.
             read_regular(staging / 'config')
-            write_new(staging / 'rund-config', CACHE_CONFIG)
-            os.replace(staging / 'rund-config', staging / 'config')
-            write_new(staging / 'rund-owner', canonical({'format': FORMAT, 'repository': uri}))
+            write_new(staging / 'source-config', CACHE_CONFIG)
+            os.replace(staging / 'source-config', staging / 'config')
+            write_new(staging / 'source-owner', canonical({'format': FORMAT, 'repository': uri}))
             sync_dir(staging)
             os.rename(staging, db)
             sync_dir(db.parent)
-        require(read_regular(db / 'rund-owner') == canonical({'format': FORMAT, 'repository': uri}), 'unknown or incomplete cache (retained)')
+        require(read_regular(db / 'source-owner') == canonical({'format': FORMAT, 'repository': uri}), 'unknown or incomplete cache (retained)')
         # Git is only run against a config we created, never a source config.
         expected = CACHE_CONFIG
         require(read_regular(db / 'config') == expected, 'modified cache config refused')
@@ -311,80 +281,3 @@ def verify_tree(path, inventory, *, sealed=False):
             require(stat.S_IMODE(p.stat().st_mode) == (0o555 if record['gitMode'] == '100755' else 0o444), 'published mode mismatch')
             seen.add(rel)
     require(seen == set(inventory), 'published files missing')
-
-
-def prepare(declaration, root):
-    d = validate(declaration)
-    root = init_root(root)
-    git = Git(root, path=d['spec'].get('context',{}).get('path'))
-    python = shutil.which(d['spec']['toolchain']['python'])
-    require(python is not None, 'missing declared python tool')
-    py_identity = tool_identity(python)
-    require(Path(py_identity['path']) == Path(sys.executable).resolve(), 'only current Python interpreter supported')
-    py_identity['version'] = sys.version
-    inputs = {'format': FORMAT, 'declaration': d, 'tools': {'git': git.identity, 'python': py_identity},
-              'platform': {'system': platform.system(), 'machine': platform.machine()}, 'locks': {}}
-    # Repo locks in sorted canonical order avoid deadlocks across declarations.
-    from contextlib import ExitStack
-    with ExitStack() as stack:
-        repos = {repository(s['repository']) for s in d['spec']['sources']}
-        for repo in sorted(repos, key=str):
-            stack.enter_context(lock(root / 'state/locks' / ('repo-' + digest(str(repo).encode()) + '.lock')))
-        # Always verify the full pinned source objects before using a manifest.
-        stage = root / 'state/staging' / uuid.uuid4().hex
-        directory(stage)
-        inventories = {}
-        for src in d['spec']['sources']:
-            repo = repository(src['repository'])
-            db = git.cache(repo)
-            if isinstance(repo, Path):
-                objects = source_objects(repo, root)
-            else:
-                try:
-                    git.object(db, db / 'objects', src['revision'], 'commit')
-                except ValueError:
-                    git.fetch(db, src)
-                objects = db / 'objects'
-            target = directory(stage / src['alias'])
-            inv = export(git, db, objects, src['revision'], target)
-            verify_tree(target, inv)
-            inventories[src['alias']] = inv
-            inputs['locks'][src['alias']] = {}
-            for rel in src.get('lockFiles', []):
-                require(rel in inv and inv[rel]['gitMode'] in ('100644', '100755'), 'lockFile must be a tracked regular file')
-                inputs['locks'][src['alias']][rel] = inv[rel]['sha256']
-        key = digest(canonical(inputs))
-        manifest_path = root / 'manifests' / (key + '.json')
-        with lock(root / 'state/locks' / ('prepare-' + key + '.lock')):
-            if manifest_path.exists() or manifest_path.is_symlink():
-                manifest = json.loads(read_regular(manifest_path))
-                require(type(manifest) is dict, 'manifest must be a JSON object (retained)')
-                require(manifest.get('format') == FORMAT and manifest.get('complete') is True and manifest.get('key') == key and manifest.get('inputs') == inputs and manifest.get('files') == inventories, 'incomplete or mismatched manifest (retained)')
-                code_name = manifest.get('codeDirectory', '')
-                require(type(code_name) is str and len(code_name) == 97 and code_name[:64] == key and code_name[64] == '-' and all(c in '0123456789abcdef' for c in code_name[65:]), 'unsafe code directory in manifest')
-                code = root / 'code' / code_name
-                no_links(code)
-                require(stat.S_IMODE(code.stat().st_mode) == 0o555, 'published code directory mode mismatch')
-                for alias, inv in inventories.items():
-                    verify_tree(code / alias, inv, sealed=True)
-                require(set(p.name for p in code.iterdir()) == set(inventories), 'unexpected published source alias')
-                return {'key': key, 'cacheHit': True, 'manifest': str(manifest_path), 'code': str(code), 'work': str(root / 'work')}
-            code_name = key + '-' + uuid.uuid4().hex
-            code = root / 'code' / code_name
-            for base, dirs, files in os.walk(stage, topdown=False):
-                sync_dir(Path(base))
-                if Path(base) != stage:
-                    os.chmod(base, 0o555)
-            # Moving a directory across parents may require write permission on
-            # that directory to update '..'. Seal the top only after the move.
-            os.rename(stage, code)
-            os.chmod(code, 0o555)
-            sync_dir(code)
-            sync_dir(root / 'code')
-            manifest = {'format': FORMAT, 'complete': True, 'key': key, 'inputs': inputs,
-                        'files': inventories, 'codeDirectory': code_name}
-            temp = root / 'manifests' / ('.' + uuid.uuid4().hex + '.tmp')
-            write_new(temp, canonical(manifest))
-            os.rename(temp, manifest_path)
-            sync_dir(manifest_path.parent)
-            return {'key': key, 'cacheHit': False, 'manifest': str(manifest_path), 'code': str(code), 'work': str(root / 'work')}

@@ -1,4 +1,4 @@
-"""Strict, deliberately small rund/v1alpha1 JSON experiment (no execution)."""
+"""Validation of ordinary fixed Git source plans; no execution objects."""
 import json
 import re
 from urllib.parse import urlsplit, unquote
@@ -51,52 +51,12 @@ def repository(value):
     return path
 
 
-def no_duplicates(pairs):
-    result = {}
-    for k, v in pairs:
-        require(k not in result, 'duplicate JSON field: ' + k)
-        result[k] = v
-    return result
-
-
-def load(path):
-    try:
-        data = json.loads(Path(path).read_text(encoding='utf-8'), object_pairs_hook=no_duplicates,
-                          parse_constant=lambda _: require(False, 'nonfinite JSON number'))
-    except (UnicodeError, json.JSONDecodeError) as e:
-        raise ContractError('invalid JSON: ' + str(e)) from e
-    return validate(data)
-
-
-def validate(d):
-    fields(d, ('apiVersion', 'kind', 'metadata', 'spec'))
-    require(d['apiVersion'] == 'rund/v1alpha1', 'unsupported apiVersion')
-    require(d['kind'] in ('Service', 'Task'), 'unsupported kind')
-    fields(d['metadata'], ('id', 'version'))
-    name(d['metadata']['id'])
-    require(type(d['metadata']['version']) is int and d['metadata']['version'] > 0, 'version must be positive integer')
-    common = ('node', 'sources', 'prepare', 'toolchain', 'argv', 'cwd', 'env', 'credentialRefs')
-    special = ('desired', 'restart') if d['kind'] == 'Service' else ('attemptId', 'requestId')
-    s = d['spec']
-    fields(s, common + special, ('context',))
-    name(s['node'])
-    require(s['prepare'] == [] and type(s['prepare']) is list, 'nonempty prepare unsupported')
-    from .source_environment import validate_context, validate_credentials
-    validate_credentials(s['credentialRefs'])
-    validate_context(s.get('context', {}))
-    fields(s['toolchain'], ('python',))
-    text(s['toolchain']['python'])
-    require(s['cwd'] == '${work}', 'only independent ${work} cwd supported')
-    require(type(s['argv']) is list and bool(s['argv']), 'argv must be nonempty list')
-    for item in s['argv']:
-        text(item)
-    require(type(s['env']) is dict, 'env must be object')
-    for k, v in s['env'].items():
-        require(re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', k) is not None, 'invalid env key')
-        require(type(v) is str and '\x00' not in v, 'invalid env value')
-    require(type(s['sources']) is list and 0 < len(s['sources']) <= 64, 'sources must contain 1..64 entries')
+def validate(plan):
+    fields(plan, ('sources',), ('format',))
+    require(plan.get('format', 'git-sources/v1') == 'git-sources/v1', 'unsupported source plan format')
+    require(type(plan['sources']) is list and 0 < len(plan['sources']) <= 64, 'sources must contain 1..64 entries')
     aliases = {}
-    for src in s['sources']:
+    for src in plan['sources']:
         fields(src, ('alias', 'repository', 'revision', 'requires'), ('lockFiles', 'sshConfig'))
         if 'sshConfig' in src:
             text(src['sshConfig'])
@@ -129,18 +89,4 @@ def validate(d):
         visited.add(alias)
     for alias in by_name:
         visit(alias)
-    # Placeholders are validated but never expanded/executed by prepare.
-    for item in s['argv'] + list(s['env'].values()):
-        for token in re.findall(r'\$\{([^}]*)\}', item):
-            require(token == 'work' or token.startswith('code.') and token[5:] in by_name, 'unknown placeholder')
-        require('${' not in re.sub(r'\$\{[^}]*\}', '', item), 'unclosed placeholder')
-    if d['kind'] == 'Task':
-        name(s['attemptId'])
-        name(s['requestId'])
-    else:
-        require(s['desired'] in ('online', 'offline'), 'invalid desired')
-        r = s['restart']
-        fields(r, ('policy', 'initialSeconds', 'maxSeconds'))
-        require(r['policy'] in ('manual', 'on-failure', 'always'), 'invalid restart policy')
-        require(all(type(r[k]) in (int, float) and 0 <= r[k] <= 86400 for k in ('initialSeconds', 'maxSeconds')) and r['initialSeconds'] <= r['maxSeconds'], 'invalid bounded backoff')
-    return d
+    return plan

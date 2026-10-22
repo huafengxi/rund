@@ -6,7 +6,7 @@ Service 是持续监督对象；每次执行均为独立 Task。Task 是唯一�
 
 共享根默认用 services/<id>/、tasks/<id>/ 组织对象，各含 declaration.json 和 state.json。处理只依据 kind、id、node，不从路径推断语义或节点。id 全局唯一；相同身份多路径拒绝。声明由 publisher 映射的节点单写，状态由 node 的 Owner 单写。配置附件由指定发布节点单写。同步副本只读，不能覆盖本机原件或取得执行权。
 
-私有根包含节点配置、Owner 锁、接受记录、源码缓存、artifacts、日志和工作目录；不参加同步。共享根与私有根必须不相交。运行源码和机器配置由调用方注入，机制仓不保存部署值。
+私有根包含节点配置、Owner 锁、接受记录、源码缓存、artifacts 及 tasks/<id> 中的日志和工作目录；不参加同步。共享根与私有根必须不相交。运行源码和机器配置由调用方注入，机制仓不保存部署值。
 
 声明 revision 每次修改递增；状态由来源写者经串行链路覆盖副本，不按墙钟或 mtime 决定权威。Task 终态副本同样冻结。Service version 单独表示执行定义版本。
 
@@ -37,3 +37,9 @@ Service 状态另含 currentTask、nextStartAt、restartCount；nextStartAt 为 
 ## Bootstrap
 
 安装固定 runtime、同步工具和准备工具，写入本机配置与普通同步 Service；通过调用方 make 入口启动图外 Owner。同步 Service 直接执行已安装工具，无业务源码依赖。后续发布准备 Task 与业务 Service；准备工具获取固定源码并发布本地产物，业务 Task 仅等待 needs 文件。工具、端点、发布者映射及密钥位置由调用方提供。
+
+## 统一入口
+
+servicectl status [name/id] 查询；start/stop <Service> 修改原发布者 desired 并等待实际状态；cancel <Task> [--mode kill] 发布取消。publish --input <file> 由声明原发布者执行。owner start/stop 操作图外 Owner；owner run 是前台底座入口。Makefile 不是协议约束。客户端不能直接执行或发信号给受管负载，不能回写 state。远端修改经 SSH 路由到声明原发布者；目标机仅执行自己的对象。
+
+node.json 是本机公共配置权威；普通同步配置通过 nodeConfig 引用它，只保存运输字段。Owner 身份和诊断同在 owner.json，已接受声明在 accepted.json。源码准备计划只描述固定 sources，不复用执行声明；Git 缓存与最终 artifacts 之间没有第二套代码或 manifest 目录。

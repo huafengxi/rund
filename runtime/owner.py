@@ -15,9 +15,9 @@ class Owner:
         self.fd=lock(self.private/'locks/owner.lock');self.processes=Processes(c)
         self.accepted_path=self.private/'accepted.json';self.accepted=read(self.accepted_path) if self.accepted_path.exists() else {}
         self.objects={};self.errors=[]
-        for k in ('artifacts','logs','work'):directory(self.private/k)
+        for k in ('artifacts','tasks'):directory(self.private/k)
         from .native import identity
-        self.identity=identity(os.getpid());write(self.private/'owner.json',dict(self.identity,startedAt=now()))
+        self.identity=identity(os.getpid());write(self.private/'owner.json',dict(self.identity,startedAt=now(),diagnostics=[]))
     def close(self):os.close(self.fd)
     def state(self,path):
         p=path.with_name('state.json');return read(p) if p.exists() else None
@@ -120,7 +120,7 @@ class Owner:
             try:
                 if d['kind']=='Task':self.task(p,d)
             except (OSError,ValueError,KeyError,TypeError,RuntimeError) as e:self.errors.append(d['id']+': '+str(e))
-        write(self.private/'health.json',dict(node=self.c['node'],observedAt=now(),diagnostics=self.errors))
+        record=read(self.private/'owner.json');record.update(node=self.c['node'],observedAt=now(),diagnostics=self.errors);write(self.private/'owner.json',record)
     def run(self):
         def stop(*unused):self.stopped=True
         for sig in (signal.SIGTERM,signal.SIGINT):signal.signal(sig,stop)
