@@ -20,7 +20,7 @@ import subprocess
 import sys
 import uuid
 
-from .contract import require, repository, relative, validate
+from .source_contract import require, repository, relative, validate
 
 FORMAT = 'rund-prepare/v1alpha1-object-export-1'
 LAYOUT = ('cache', 'code', 'manifests', 'work', 'state', 'protocol')

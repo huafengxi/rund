@@ -81,7 +81,7 @@ def validate(d):
     fields(s, common + special, ('context',))
     name(s['node'])
     require(s['prepare'] == [] and type(s['prepare']) is list, 'nonempty prepare unsupported')
-    from .environment import validate_context, validate_credentials
+    from .source_environment import validate_context, validate_credentials
     validate_credentials(s['credentialRefs'])
     validate_context(s.get('context', {}))
     fields(s['toolchain'], ('python',))

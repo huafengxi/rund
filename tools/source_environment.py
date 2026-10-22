@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
-from .contract import fields,require,text
+from .source_contract import fields,require,text
 
 KEY=re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
 

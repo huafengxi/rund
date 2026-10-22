@@ -1,118 +1,39 @@
-# Local runtime and service registry
+# 声明对象与本机执行合同
 
-`rund.py --config /absolute/node.json owner` is the foreground coordinator.
-`start/stop service-sync` bootstraps only that coordinator from pinned Git objects;
-`start/stop NAME`, `sync`, and `status [--machine]` use the same file protocol.
-The caller exposes these through its service launcher (for example Make targets).
+Service 是持续监督对象；每次执行均为独立 Task。Task 是唯一持有进程身份和实际 wait 的执行对象。完整字段和机制由 runtime/config.py 校验，运行数据由 runtime/owner.py 生成。
 
-Node config `rund-node/v1` declares node, root, protocol, workspace, python, home,
-path and named Git sources. For legacy installed snapshots, optional services maps names to argv/source aliases,
-env/context; external lists services managed by their official API; interval is
-registry reconciliation seconds. No hostnames or deployment defaults live here.
-The runtime source alias is `runtime`. Bootstrap service defaults to service-sync.
-Profiles and daemon declarations come from the caller workspace services tree.
-Changing a managed declaration requires a higher profile version.
+## 文件与写权
 
-Services execute in foreground, in one same-UID/session/group contract; a
-self-daemonizing profile requires an explicit foreground binding. External
-third-party daemons retain their official lifecycle API. Bootstrap is deliberately
-outside its own workload graph. Stop managed services before replacing an owner;
-restarting a coordinator does not fabricate parent wait for surviving workloads.
-Unknown/pending facts retain their original request identities and block replay.
+共享根默认用 services/<id>/、tasks/<id>/ 组织对象，各含 declaration.json 和 state.json。处理只依据 kind、id、node，不从路径推断语义或节点。id 全局唯一；相同身份多路径拒绝。声明由 publisher 映射的节点单写，状态由 node 的 Owner 单写。配置附件由指定发布节点单写。同步副本只读，不能覆盖本机原件或取得执行权。
 
-Optional execution context declares absolute cwd/home, PATH and inherited names.
-Credential references declare local file, optional loader argv and required names;
-values are loaded in memory before spawn, never copied to declarations/results.
-Callers own their PATH, source pins, registry values and source mirrors. Linux and
-Darwin use native boot/start/UID/session/group facts and actual child wait.
+私有根包含节点配置、Owner 锁、接受记录、源码缓存、artifacts、日志和工作目录；不参加同步。共享根与私有根必须不相交。运行源码和机器配置由调用方注入，机制仓不保存部署值。
 
-## Shared desired state and minimal bootstrap
+声明 revision 每次修改递增；状态由来源写者经串行链路覆盖副本，不按墙钟或 mtime 决定权威。Task 终态副本同样冻结。Service version 单独表示执行定义版本。
 
-Set `registryFile` to an absolute locally transported snapshot, `bootstrapVersion`
-to the fixed coordinator deployment version, and `seedServices` to an array of
-service records needed to establish transport. In this mode node `services` and
-`external` bindings are forbidden. Node `sources` need only contain the runtime
-bootstrap pin and any sources needed to prepare the seed BEFORE the link exists.
-`seedServices` is not an install list of business applications.
+## 声明
 
-A record has `name`, `declaration` (a complete `rund/v1alpha1` Service), and optional
-`status`, `external` and `stop_cmd` using existing probe/official-manager contracts.
-The declaration contains its target node, executable version, fixed source pins
-and dependency graph, argv, context, environment, credential references, desired
-state and restart policy. No execution binding is looked up in node.json.
+公共必需字段：kind、id、publisher、node、revision。可选 name 用于显示，不决定身份。
 
-The activation unit is one JSON object:
+Task 必需 desired、argv；可选 needs、cwd、env、cancelMode、service。desired 为 run/cancel，仅允许 run 转 cancel；除 revision、desired、取消模式外的执行定义发布后不可变。取消发布后模式固定。needs 为本机文件路径，全部在场才启动；缺失时等待，取消不等待依赖。argv 无 shell。cwd 默认任务工作目录，环境从显式节点 HOME/PATH 与声明 env 构造，不继承调用者身份。service 引用生成它的 Service id、version、declarationDigest。
 
-```
-{"apiVersion":"rund-registry/v1","sha256":"<canonical payload SHA-256>",
- "payload":{"node":"<caller node>","generation":1,"services":[<records>]}}
-```
+Service 必需 version、desired、restart、task；可选 probe。desired 为 online/offline；restart 为 manual/on-failure/always；task 是 argv、needs、cwd、env 模板。修改模板、策略或探针须提高 version。每次启动复制模板生成新 Task；原 Task 状态未知或负载未收口时阻塞替代执行。offline 取消当前 Task 并停止后续创建。
 
-Canonical encoding is `runtime.prepare.canonical`. A checksum detects incomplete
-or corrupt transport, not an adversarial publisher; transport permissions and
-controller authorization belong to the caller. The controller is the sole writer
-of registryFile's authority. The worker NEVER writes it. Its Owner atomically
-persists a last-good snapshot and input digest in PRIVATE `registry-accepted.json`.
-An invalid, absent or regressed input is diagnosed and leaves last-good workloads
-and seed transport available. An equal generation must have identical input bytes
-under canonical encoding. Node selection and all records validate before acceptance.
+路径占位符：${shared}、${private}、${artifacts}、${work}、${runtime}。needs 不引用其他 Task 身份。产物准备程序在独立 Task 中执行，完整产物原子发布后最后发布完成文件；成功发布的产物不可变，被引用期间不得清理。
 
-A higher generation replaces the whole non-seed desired set. An omitted accepted
-service becomes a retained offline tombstone and its real generation is stopped
-through the existing exact control path. Missing input does NOT mean deletion.
-An omitted seed remains installed; override it explicitly to update/stop it.
-Changing executable content requires a higher service version. Online/offline
-changes need a higher snapshot generation, not a fake executable version bump.
-No repeated synchronization creates another running generation. Unknown/pending
-operations retain their original request identity and block automatic replay.
-The CLI refuses worker-side managed start/stop: publish at the controller. `sync`
-in this mode is a read-only confirmation; the Owner consumes on its interval.
-`status` includes registry diagnostics and blocked targets as well as actual rows.
+## 状态
 
-### Official external managers
+公共字段：kind、id、node、declarationDigest、updatedAt、phase、reason。摘要对应已接受声明，时间仅作观测说明。
 
-An external record requires `status` and `stop_cmd`. Its start argv, execution
-context, credentials and fixed sources come from the complete declaration.
-Readiness commands run in the declared context. The Owner uses the official
-manager exclusively; the daemon never enters the Runtime process/wait graph.
-An already-online daemon is adopted as an explicitly marked probe baseline.
-External `version` identifies the applied manager binding, not a measured
-daemon binary version; `adopted` distinguishes that baseline from a successful
-manager action. A changed binding prepares its replacement before stopping the
-old binding, then starts the replacement through its official manager.
+Task 状态另含 process、startedAt、finishedAt、exitCode、signal、waitObserved；process 保留原生 boot/start/pid/uid/pgid/session 身份。阶段为 accepted、preparing、starting、running、canceling、unknown、succeeded、failed、canceled。后三者为终态，整份 state.json 冻结。取消记录必要的信号阶段和截止时间；只有真实 wait 和组收口后才能完成已启动 Task。启动前失败或取消可无进程、无 wait；未知身份或旧 Owner 丢失 wait 不伪造终态。
 
-Each effect first persists `external/<name>/manager-<sequence>.json` and a head
-reference. Completion records the real manager exit and matching readiness
-probe. `managerWaitObserved` concerns the manager command only. A pending,
-timed-out, failed or unconfirmed action retains its exact identity and blocks
-automatic replay, even after an Owner restart or a newer desired publication.
-Completed receipts recover an interrupted head projection without another
-effect. Operators must inspect and resolve unknown official-manager outcomes;
-probe success alone cannot complete an interrupted receipt. Publication deletion
-uses the retained binding's stop command. Manager-kind changes are rejected.
-Snapshots expose `externalServices`; unknown external outcomes also appear in
-diagnostics and blocked targets. No manager output or credential values are
-copied to receipts.
+Service 状态另含 currentTask、nextStartAt、restartCount。阶段为 stopped、starting、running、stopping、backoff、blocked。进程事实只存在关联 Task；currentTask 可在终态后保留。
 
-## Fixed remote sources
+每次更新原子替换整份文件。Owner 重启读取已接受声明及原状态，starting/unknown 不自动重放 spawn。Owner 自身在受管图外，替换前收口全部 Task。
 
-Source `repository` may be canonical local `file:///`, absolute `ssh://` or
-credential-free `https://`. Every source still requires a full lowercase 40-hex
-commit revision. SSH sources additionally require an absolute `sshConfig` file
-reference; access keys remain in caller-controlled private storage. Git does not
-load ambient global/system config, source config or hooks. The narrowly scoped
-fetch enables only the declared transport, disables recursive submodule fetch,
-uses BatchMode/no SSH connection sharing and a bounded fetch timeout. HTTPS does
-not accept URL userinfo, query strings or fragments.
+## 配置与凭据
 
-The node imports a pin into its private object cache, then uses the SAME verified
-object export, read-only tree and prepare manifest path as local sources. A cached
-verified commit works during transport outages; a new commit cannot report success
-without object verification. A preparation failure leaves the previous running
-version unchanged and is diagnosed. Registry reconciliation retries only completed
-pre-spawn prepare failures, with a new exact request ID. Pending, unknown and
-possibly-effectful outcomes are never turned into retry permission.
+普通配置与密文凭据可作为版本化共享文件；本机密钥不进入同步根。应用或普通启动包装器在内存解密并 exec 应用，核心不解释密文或加载 secret。声明和状态只保存引用；包装器不回显值或将其写入同步文件。bootstrap 通过显式私有引用提供工具与密钥。轮换发布新配置路径并更新 Service 模板，旧 Task 不被修改。
 
-Retained tests: set a new absolute RUND_NATIVE_OUTPUT for runtime.test_native;
-set RUND_CLI_TEST_OUTPUT for test_service_cli.py. No production workload or model
-is used, and fixture directories are retained.
+## Bootstrap
+
+安装固定 runtime、同步工具和准备工具，写入本机配置与普通同步 Service；通过调用方 make 入口启动图外 Owner。同步 Service 直接执行已安装工具，无业务源码依赖。后续发布准备 Task 与业务 Service；准备工具获取固定源码并发布本地产物，业务 Task 仅等待 needs 文件。工具、端点、发布者映射及密钥位置由调用方提供。
