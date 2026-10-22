@@ -1,8 +1,10 @@
-# serviced — 单写者对象与本机 Task 执行
+# rund — 单写者对象与本机 Task 执行
 
-本仓提供声明校验、单节点 Owner、Task 进程监督、Service 策略、对象客户端及普通任务工具。机器、仓地址、工具、目录、同步端点与凭据引用由调用方提供。统一入口 servicectl.py，正式合同见 [PROTOCOL.md](PROTOCOL.md)。
+本仓提供声明校验、单节点 Owner、Task 进程监督、Service 策略、对象客户端及普通任务工具。机器、仓地址、工具、目录、同步端点与凭据引用由调用方提供。统一入口 runctl.py，正式合同见 [PROTOCOL.md](PROTOCOL.md)。
 
 runtime/config.py 定义声明；store.py 提供原子持久化；protocol.py 是轻量客户端；owner.py 协调 Service 与 Task；process.py/native.py 处理真实进程身份、wait 与组收口；cli.py 暴露安装节点操作。
+
+runtime/admission.py 供各节点只读检查 grant；runtime/scheduling.py 与 tools/scheduler.py 提供普通 scheduler Service，独立处理全局资源和并发策略。scheduler 配置与部署位置由调用方的 Service 声明及配置附件提供，不嵌入节点 Owner。
 
 共享对象各包含 declaration.json 和 state.json，声明与状态分别单写。Service 每次执行创建独立 Task；Task 通过 needs 等待本机文件。Task 终态状态冻结；未知事实不重放。节点锁、源码产物、日志、工作目录与密钥留在本机私有根。
 

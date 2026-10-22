@@ -116,13 +116,13 @@ Task 的常见路径为 `accepted → preparing → queued → starting → runn
 
 ## Bootstrap
 
-调用方先提供固定 runtime 源码目录和同步工具、节点配置、同步配置、私有凭据引用及普通同步 Service 声明。tools/bootstrap.py 接收 --prefix、--node-config、--runtime-source、--revision，可用 --upgrade 允许已有安装根。它写 prefix/local/node.json（runtimeSource 指向传入目录）、创建共享根及私有 artifacts/locks/tasks、生成 bin/servicectl。revision 参数校验为固定 40 位小写 SHA；安装器不导出、复制或校验源码目录与该 SHA 的对应关系，固定源码由调用方保证。安装器也不生成同步配置和 Service 声明。
+调用方先提供固定 runtime 源码目录和同步工具、节点配置、同步配置、私有凭据引用及普通同步 Service 声明。tools/bootstrap.py 接收 --prefix、--node-config、--runtime-source、--revision，可用 --upgrade 允许已有安装根。它写 prefix/local/node.json（runtimeSource 指向传入目录）、创建共享根及私有 artifacts/locks/tasks、生成 bin/runctl。revision 参数校验为固定 40 位小写 SHA；安装器不导出、复制或校验源码目录与该 SHA 的对应关系，固定源码由调用方保证。安装器也不生成同步配置和 Service 声明。
 
-通过 servicectl owner start 启动图外 Owner；配置 syncConfig 时先执行一次同步，失败则不启动 Owner。同步 Service 直接执行预先提供的固定工具，无业务源码依赖。后续发布准备 Task 与业务 Service；准备工具获取固定源码并发布本地产物，业务 Task 仅等待 needs 文件。工具、端点、发布者映射及密钥位置由调用方提供。
+通过 runctl owner start 启动图外 Owner；配置 syncConfig 时先执行一次同步，失败则不启动 Owner。同步 Service 直接执行预先提供的固定工具，无业务源码依赖。后续发布准备 Task 与业务 Service；准备工具获取固定源码并发布本地产物，业务 Task 仅等待 needs 文件。工具、端点、发布者映射及密钥位置由调用方提供。
 
 ## 统一入口
 
-servicectl status [name/id] 查询；start/stop <Service> 修改原发布者 desired 并等待实际状态；cancel <Task> [--mode kill] 发布取消。publish --input <file> 由声明原发布者执行。owner start/stop 操作图外 Owner；owner run 是前台底座入口。Makefile 不是协议约束。客户端不能直接执行或发信号给受管负载，不能回写 state。远端修改经 SSH 路由到声明原发布者；目标机仅执行自己的对象。
+runctl status [name/id] 查询；start/stop <Service> 修改原发布者 desired 并等待实际状态；cancel <Task> [--mode kill] 发布取消。publish --input <file> 由声明原发布者执行。owner start/stop 操作图外 Owner；owner run 是前台底座入口。Makefile 不是协议约束。客户端不能直接执行或发信号给受管负载，不能回写 state。远端修改经 SSH 路由到声明原发布者；目标机仅执行自己的对象。
 
 | 命令（全局支持 `--config <node.json>`） | 实际行为 |
 | --- | --- |
@@ -144,9 +144,13 @@ node.json 是本机公共配置权威；普通同步配置通过 nodeConfig 引�
 
 ## 全局执行放行
 
-节点配置 scheduler 指定唯一放行节点和 maxConcurrent。该节点 Owner 单写 shared/scheduling/state.json；grants 保存 Task id 与不可变执行定义摘要的绑定。其他 Owner 只读。资源名为不透明的全局字符串，按原样比较；机器隔离由调用方命名。
+scheduler 是普通 Service，其 task.argv 执行 `tools/scheduler.py --config <配置附件>`，模板省略 resources，因此启动不依赖自身放行。独立配置字段为 nodeConfig、publisher、maxConcurrent，可选 interval（默认 0.2 秒）。publisher 必须映射到当前部署节点，本机 scheduler.lock 排除第二个写者。部署节点由 Service.node 指定，各节点 Owner 职责相同。
+
+节点配置 `admission={"publisher":"<调度发布者>"}` 只指定可信放行来源，经 publishers 映射定位原写者；节点不保存并发或排队策略。scheduler 单写 shared/scheduling/state.json，字段为 node、grants、maxConcurrent、updatedAt；grants 保存 Task id 与不可变执行定义摘要的绑定。Owner 只读并检查来源节点和摘要，取得 grant 后负责本机执行。资源名为不透明的全局字符串，按原样比较；机器隔离由调用方命名。
 
 Task 显式携带 resources 时参加全局名额分配，[] 表示只占名额；省略时独立执行，用于底座与常驻服务。目标 Owner 在文件齐备后写 queued、queuedAt，获得匹配 grant 才 spawn。放行者按排队时间和 id 扫描，资源被占者不阻塞其它候补。只有 Task 终态释放 grant；unknown、未执行和离线节点均保留占位。存在非终态执行而放行记录丢失时拒绝新放行，须恢复记录后继续。
+
+scheduler 停止时保留持久化 grant，已运行 Task 继续由各节点 Owner 监督；已有匹配 grant 的 Task 仍可启动，新候补等待新 grant。scheduler 通过普通 Service 生命周期独立重启，重新读取并保留未终态占位，不要求重启节点 Owner。
 
 ## 共享树运输
 

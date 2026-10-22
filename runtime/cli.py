@@ -65,7 +65,7 @@ def launcher(c,path,action):
             if owner_alive(c):return
             logfile=directory(private)/'owner.log'
             with logfile.open('ab',buffering=0) as f:
-                child=subprocess.Popen([c['python'],'-B',str(Path(__file__).resolve().parents[1]/'servicectl.py'),'--config',str(path),'owner','run'],stdin=subprocess.DEVNULL,stdout=f,stderr=f,start_new_session=True,env=dict(HOME=c['home'],PATH=c['path'],LC_ALL='C.UTF-8',PYTHONDONTWRITEBYTECODE='1'))
+                child=subprocess.Popen([c['python'],'-B',str(Path(__file__).resolve().parents[1]/'runctl.py'),'--config',str(path),'owner','run'],stdin=subprocess.DEVNULL,stdout=f,stderr=f,start_new_session=True,env=dict(HOME=c['home'],PATH=c['path'],LC_ALL='C.UTF-8',PYTHONDONTWRITEBYTECODE='1'))
             end=time.monotonic()+10
             while time.monotonic()<end:
                 require(child.poll() is None,'Owner exited during startup')
@@ -94,7 +94,7 @@ def set_desired(c,id,value,mode=None):
     import shlex
     argv=['desired',id,value]+(['--mode',mode] if mode else [])
     result=subprocess.run(['ssh','-o','BatchMode=yes',origin,
-        'exec "$HOME/.agentd/bin/servicectl" '+shlex.join(argv)],capture_output=True,text=True,timeout=45)
+        'exec "$HOME/.agentd/bin/runctl" '+shlex.join(argv)],capture_output=True,text=True,timeout=45)
     require(result.returncode==0,'publisher unavailable: '+result.stderr[-1000:])
     return json.loads(result.stdout)
 
@@ -119,7 +119,7 @@ def service(c,selector,action):
 
 
 def main(argv=None,default_config=None):
-    p=argparse.ArgumentParser(prog='servicectl',description='Single-writer declarations and the sole local execution Owner.')
+    p=argparse.ArgumentParser(prog='runctl',description='Single-writer declarations and the sole local execution Owner.')
     p.add_argument('--config',type=Path,default=default_config or Path.home()/'.agentd/local/node.json')
     sub=p.add_subparsers(dest='action',required=True)
     st=sub.add_parser('status');st.add_argument('selector',nargs='?')
@@ -161,6 +161,6 @@ def main(argv=None,default_config=None):
             print(json.dumps(set_desired(c,a.id,'cancel' if a.action=='cancel' else a.value,a.mode)))
         return 0
     except (OSError,ValueError,KeyError,TypeError,RuntimeError,subprocess.SubprocessError) as e:
-        print('servicectl: '+str(e),file=sys.stderr);return 2
+        print('runctl: '+str(e),file=sys.stderr);return 2
 
 if __name__=='__main__':sys.exit(main())

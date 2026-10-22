@@ -13,7 +13,7 @@ from runtime.store import write,read
 
 class CLI(unittest.TestCase):
     def setUp(self):
-        self.base=Path(tempfile.mkdtemp(prefix='servicectl-')).resolve();self.prefix=self.base/'node';self.root=self.prefix/'shared';self.bin=self.prefix/'bin/servicectl'
+        self.base=Path(tempfile.mkdtemp(prefix='runctl-')).resolve();self.prefix=self.base/'node';self.root=self.prefix/'shared';self.bin=self.prefix/'bin/runctl'
         c=dict(node='fixture',sharedRoot=str(self.root),privateRoot=str(self.prefix/'local'),python=sys.executable,home=str(self.base),path=os.environ['PATH'],publishers={'operator':'fixture','owner-fixture':'fixture'},version=1)
         install(self.prefix,c,Path(__file__).resolve().parents[1],'a'*40);self.call('owner','start')
     def call(self,*args,good=True):

@@ -8,7 +8,7 @@ import uuid
 from .config import FINAL,changed,discover,publish,validate
 from .process import Processes,expand
 from .store import digest,directory,lock,now,read,require,write
-from .scheduling import admitted,reconcile
+from .admission import admitted
 
 class Owner:
     def __init__(self,c):
@@ -62,7 +62,7 @@ class Owner:
             missing=[f for f in d.get('needs',[]) if not Path(expand(f,self.c,d['id'])).is_file()]
             if missing:self.save(p,s,phase='preparing',reason='missing files: '+', '.join(missing));return
             if 'resources' in d:
-                require('scheduler' in self.c,'resources require a scheduler')
+                require('admission' in self.c,'resources require an admission publisher')
                 if not admitted(self.c,d):
                     self.save(p,s,phase='queued',queuedAt=s.get('queuedAt') or now(),reason='awaiting global admission');return
             self.save(p,s,phase='starting',reason='spawn intent')
@@ -117,8 +117,6 @@ class Owner:
         self.save(p,s,declarationDigest=digest(d),phase='starting',currentTask=task['id'],nextStartAt=None,reason=None)
     def round(self):
         self.accept()
-        try:reconcile(self.c)
-        except (OSError,ValueError,KeyError,TypeError) as e:self.errors.append('scheduler: '+str(e))
         for p,d in list(self.objects.values()):
             try:
                 if d['kind']=='Service':self.service(p,d)

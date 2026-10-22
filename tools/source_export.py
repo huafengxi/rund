@@ -140,7 +140,7 @@ class Git:
         cmd = [self.path, '--no-replace-objects', '-c', 'core.hooksPath=/dev/null',
                '-c', 'protocol.allow=never', '-c', 'protocol.' + protocol + '.allow=always',
                '--git-dir=' + str(db), 'fetch', '--no-tags', '--no-recurse-submodules',
-               '--', source['repository'], source['revision'] + ':refs/serviced/pins/' + source['revision']]
+               '--', source['repository'], source['revision'] + ':refs/rund/pins/' + source['revision']]
         try:
             p = subprocess.run(cmd, env=env, cwd=self.root, capture_output=True, timeout=120)
         except subprocess.TimeoutExpired as error:

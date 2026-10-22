@@ -79,9 +79,10 @@ def node_config(path):
     for k in ('sharedRoot','privateRoot','python','home'):require(Path(c[k]).is_absolute(),'absolute '+k+' required')
     a,b=Path(c['sharedRoot']),Path(c['privateRoot']);require(a!=b and a not in b.parents and b not in a.parents,'shared/private roots overlap')
     require(c['publishers'].get('owner-'+c['node'])==c['node'],'node owner publisher required')
-    if 'scheduler' in c:
-        s=c['scheduler'];require(isinstance(s,dict),'scheduler object required');name(s['node'])
-        require(type(s.get('maxConcurrent',4)) is int and s.get('maxConcurrent',4)>0,'positive maxConcurrent required')
+    require('scheduler' not in c,'scheduler policy belongs to a Service configuration')
+    if 'admission' in c:
+        a=c['admission'];require(isinstance(a,dict) and set(a)=={'publisher'},'admission publisher required');name(a['publisher'])
+        require(a['publisher'] in c['publishers'],'unknown admission publisher')
     return c
 
 def discover(root):

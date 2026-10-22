@@ -18,7 +18,7 @@ from runtime.protocol import get,desired
 
 class Objects(unittest.TestCase):
     def setUp(self):
-        self.base=Path(tempfile.mkdtemp(prefix='serviced-objects-'))
+        self.base=Path(tempfile.mkdtemp(prefix='rund-objects-'))
         self.c=dict(node='a',sharedRoot=str(self.base/'shared'),privateRoot=str(self.base/'private'),python=sys.executable,home=str(self.base),path=os.environ['PATH'],publishers={'operator':'a','owner-a':'a','owner-b':'b'},version=1)
         self.o=Owner(self.c)
     def tearDown(self):

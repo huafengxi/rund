@@ -1,31 +1,14 @@
-"""Single-writer global admission. Resource names are opaque global identities."""
+"""Ordinary scheduler Service; no process execution or node Owner coupling."""
+import os
+import signal
+import time
 from pathlib import Path
-from .config import FINAL, discover
-from .store import digest, read, write, now
+from .config import FINAL, discover, node_config
+from .store import read, write, now, require, lock
+from .admission import admission_path, execution_digest
 
 
-def execution_digest(d):
-    return digest({k: v for k, v in d.items() if k not in ('revision', 'desired', 'cancelMode')})
-
-
-def admission_path(c):
-    return Path(c['sharedRoot']) / 'scheduling/state.json'
-
-
-def admitted(c, d):
-    if 'resources' not in d:
-        return True
-    p = admission_path(c)
-    if not p.exists():
-        return False
-    s = read(p)
-    return s.get('node') == c['scheduler']['node'] and s.get('grants', {}).get(d['id']) == execution_digest(d)
-
-
-def reconcile(c):
-    policy = c.get('scheduler')
-    if not policy or policy['node'] != c['node']:
-        return
+def reconcile(c, policy):
     found, errors = discover(c['sharedRoot'])
     if errors:
         raise ValueError('; '.join(errors))
@@ -37,6 +20,7 @@ def reconcile(c):
                 if read(sp)['phase'] in ('starting','running','canceling','unknown'):
                     raise ValueError('restore missing admission record before scheduling')
     prior = read(path) if path.exists() else {'node': c['node'], 'grants': {}}
+    require(prior['node'] == c['node'], 'scheduler record belongs to another node')
     grants = dict(prior['grants'])
     held = set()
     for tid in list(grants):
@@ -68,3 +52,33 @@ def reconcile(c):
     limit=policy.get('maxConcurrent',4)
     if grants != prior['grants'] or prior.get('maxConcurrent') != limit or not path.exists():
         write(path, {'node': c['node'], 'grants': grants, 'maxConcurrent': limit, 'updatedAt': now()})
+
+
+class Scheduler:
+    def __init__(self, config):
+        require(set(config) <= {'nodeConfig', 'publisher', 'maxConcurrent', 'interval'}, 'unknown scheduler fields')
+        self.c = node_config(config['nodeConfig'])
+        self.policy = config
+        publisher = config['publisher']
+        require(self.c['publishers'].get(publisher) == self.c['node'], 'scheduler requires its origin node')
+        require(self.c.get('admission', {}).get('publisher') == publisher, 'scheduler admission publisher mismatch')
+        require(type(config['maxConcurrent']) is int and config['maxConcurrent'] > 0, 'positive maxConcurrent required')
+        interval = config.get('interval', .2)
+        require(type(interval) in (int, float) and interval > 0, 'positive scheduler interval required')
+        self.fd = lock(Path(self.c['privateRoot']) / 'locks/scheduler.lock')
+        self.stopped = False
+
+    def close(self):
+        os.close(self.fd)
+
+    def round(self):
+        reconcile(self.c, self.policy)
+
+    def run(self):
+        def stop(*unused):
+            self.stopped = True
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, stop)
+        while not self.stopped:
+            self.round()
+            time.sleep(self.policy.get('interval', .2))
