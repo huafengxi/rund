@@ -19,6 +19,17 @@ class Export(unittest.TestCase):
     def commit(self):
         self.git('add','--','.');self.git('-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture')
     def build(self,plan=None):return build(plan or self.plan,self.output,self.cache)
+    def test_legacy_git_and_ambient_sha256_defaults(self):
+        from unittest.mock import patch
+        import shutil
+        executable=shutil.which('git');shim=self.base/'legacy-bin';shim.mkdir();tool=shim/'git'
+        tool.write_text('#!'+sys.executable+'\nimport os,sys\nif any(a.startswith("--object-format") for a in sys.argv[1:]):raise SystemExit(129)\nos.execv('+repr(executable)+', ['+repr(executable)+', *sys.argv[1:]])\n')
+        tool.chmod(0o755)
+        with patch.dict(os.environ,{'PATH':str(shim)+os.pathsep+os.environ['PATH'],'GIT_DEFAULT_HASH':'sha256'}):
+            result=self.build()
+        self.assertEqual(result['sources']['main'],self.pin)
+        self.assertEqual((self.output/'main/data').read_bytes(),b'\x00\xff\n')
+
     def test_pin_ignores_dirty_worktree_and_modes(self):
         (self.src/'data').write_text('dirty');self.build();self.assertEqual((self.output/'main/data').read_bytes(),b'\x00\xff\n');self.assertEqual((self.output/'main/run').stat().st_mode&0o777,0o555)
     def test_reuse_and_no_duplicate_export_tree(self):

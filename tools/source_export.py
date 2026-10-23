@@ -107,7 +107,7 @@ class Git:
                     'XDG_CONFIG_HOME': str(root / 'git-home'), 'LC_ALL': 'C',
                     'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
                     'GIT_ATTR_NOSYSTEM': '1', 'GIT_TERMINAL_PROMPT': '0',
-                    'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_CONFIG_COUNT': '0'}
+                    'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_CONFIG_COUNT': '0', 'GIT_DEFAULT_HASH': 'sha1'}
         self.identity['version'] = self.run(['--version']).decode().strip()
 
     def run(self, args, *, db=None, objects=None, data=None):
@@ -156,7 +156,7 @@ class Git:
         if not db.exists():
             staging = self.root / 'git' / ('.' + key + '-' + uuid.uuid4().hex)
             directory(staging)
-            self.run(['init', '--bare', '--template=', '--object-format=sha1', str(staging)])
+            self.run(['init', '--bare', '--template=', str(staging)])
             # Git adds filesystem-dependent defaults (e.g. APFS ignorecase).
             # Publish our exact private config before reading any source object.
             read_regular(staging / 'config')
