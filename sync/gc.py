@@ -590,7 +590,7 @@ def cmd_list(ws, agents_dir):
 
 
 def main(argv=None):
-    ws = os.environ.get("GC_WORKSPACE") or _WORKSPACE
+    ws = os.environ.get("GC_WORKSPACE") or (_WORKSPACE if os.environ.get("PLATFORM_WORKSPACE") else os.path.expanduser("~/.rund/local/apps/agents-sync"))
     agents_dir = resolve_agents_dir(ws)
 
     p = argparse.ArgumentParser(

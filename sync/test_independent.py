@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 class IndependentTests(unittest.TestCase):
     def test_modules_use_only_their_real_local_helper(self):
         with tempfile.TemporaryDirectory(prefix="isolated imports '") as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             repo = root / "release with spaces"
             repo.mkdir()
             # A parent helper is deliberately hostile: no silent monorepo fallback.
@@ -48,6 +48,17 @@ class IndependentTests(unittest.TestCase):
         r = subprocess.run([sys.executable, str(HERE / 'ssh-sync.py'), 'watch'], env=env, capture_output=True, text=True)
         self.assertEqual(r.returncode, 2)
         self.assertIn('remote required', r.stderr)
+
+    def test_gc_default_state_stays_outside_the_checkout(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec=importlib.util.spec_from_file_location('bundled_gc_default',HERE/'gc.py')
+        gc=importlib.util.module_from_spec(spec);spec.loader.exec_module(gc)
+        with tempfile.TemporaryDirectory() as root:
+            shared=Path(root)/'.rund/hub/shared';shared.mkdir(parents=True)
+            with patch.dict(os.environ,{'HOME':root},clear=True),patch.object(gc,'NEUTRAL_HUB_DIR',str(shared)),patch.object(gc,'cmd_list',return_value=0) as listing:
+                self.assertEqual(gc.main(['list']),0)
+            self.assertEqual(listing.call_args.args,(str(Path(root)/'.rund/local/apps/agents-sync'),str(shared)))
 
     def test_gc_hub_resolution_priority(self):
         import importlib.util

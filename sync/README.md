@@ -44,7 +44,7 @@ watch --foreground 须显式提供绝对的 --probe-root 与 --remote-probe-root
 
 ## gc：清单是权威、schedule 只是计划（删除对账）
 
-gc.py 是 hub 上按次调用的 add/reap/list 工具。delete_contract.py 是生成端与消费端共同的路径、保护资产和审计标记合同。只有 add 写待执行计划；计划丢失时不猜测并删除。默认宽限 300 秒，先传播清单，再清理 hub 副本。
+gc.py 是 hub 上按次调用的 add/reap/list 工具。delete_contract.py 是生成端与消费端共同的路径、保护资产和审计标记合同。只有 add 写待执行计划；计划丢失时不猜测并删除。默认计划状态位于 ~/.rund/local/apps/agents-sync/run/gc；调用方可用 GC_WORKSPACE 覆盖。默认宽限 300 秒，先传播清单，再清理 hub 副本。
 
 累计清单支持离线节点重连后对账。消费端应用清单并永久拒收已删除路径。树根、裸族容器、绝对路径、..、通配符与 GC 自树受结构保护，--force 不能解除；受保护业务资产仅可经明确授权的审计旁路删除。symlink 删除其本身，不跟随目标。
 

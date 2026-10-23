@@ -30,7 +30,7 @@
     "test_watch.py": "1a977ade77682060a3a31cedd7d59526c458317e"
   },
   "adaptations": {
-    "gc.py": "Use the rund hub-directory convention and explicit caller overrides.",
+    "gc.py": "Use the rund hub directory and private GC-state conventions, with explicit caller overrides.",
     "replica-tag.py": "Read the caller-supplied hub identity.",
     "ssh-sync.py": "Document the existing SSH configuration default.",
     "tests": "Supply complete standalone imports, own fixture cleanup, and prefixed protected paths.",
