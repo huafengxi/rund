@@ -20,6 +20,7 @@ class Objects(unittest.TestCase):
     def setUp(self):
         self.base=Path(tempfile.mkdtemp(prefix='rund-objects-'))
         self.c=dict(node='a',sharedRoot=str(self.base/'shared'),privateRoot=str(self.base/'private'),python=sys.executable,home=str(self.base),path=os.environ['PATH'],publishers={'operator':'a','rund-a':'a','rund-b':'b'},version=1)
+        self.c.update(configRoot=str(self.base/'config'),servicesRoot=str(self.base/'config/objects/services'))
         self.o=Engine(self.c)
     def tearDown(self):
         for p in self.o.processes.handles.values():
@@ -28,7 +29,11 @@ class Objects(unittest.TestCase):
                 except ProcessLookupError:pass
             p.wait(timeout=5)
         self.o.close()
-    def put(self,d,path=None):return publish(self.c['sharedRoot'],d,writer='a',publishers=self.c['publishers'],path=path)
+    def put(self,d,path=None):
+        if d['kind']=='Service':
+            from runtime.services import publish as put_service
+            return put_service(self.c,d)
+        return publish(self.c['sharedRoot'],d,writer='a',publishers=self.c['publishers'],path=path)
     def task(self,id='task',argv=None,**kw):return dict(kind='Task',id=id,publisher='operator',node='a',revision=1,desired='run',argv=argv or [sys.executable,'-c','print("ok")'],**kw)
     def until(self,fn,seconds=8):
         end=time.monotonic()+seconds
@@ -37,7 +42,9 @@ class Objects(unittest.TestCase):
             if v:return v
             time.sleep(.03)
         self.fail('timeout: '+str(self.o.errors))
-    def state(self,id):return get(self.c['sharedRoot'],id)[1]
+    def state(self,id):
+        from runtime.services import get as get_object
+        return get_object(self.c,id)[1]
     def test_task_real_wait_and_terminal_freeze(self):
         self.put(self.task());s=self.until(lambda:(s if (s:=self.state('task')) and s['phase']=='succeeded' else None))
         self.assertTrue(s['waitObserved']);self.assertEqual(s['exitCode'],0)
@@ -62,17 +69,21 @@ class Objects(unittest.TestCase):
         with self.assertRaises(ValueError):self.put(dict(d,desired='cancel'))
         d=dict(d,revision=2,desired='cancel');self.put(d)
         with self.assertRaises(ValueError):self.put(dict(d,revision=3,desired='run'))
-    def test_service_restart_is_new_task(self):
-        d=dict(kind='Service',id='svc',publisher='operator',node='a',revision=1,version=1,desired='online',restart='always',task={'argv':[sys.executable,'-c','pass']})
-        self.put(d);self.until(lambda:len([v for _,v in self.o.objects.values() if v['kind']=='Task'])>=2)
-        child=[v for _,v in self.o.objects.values() if v['kind']=='Task'];self.assertEqual(len({d['id'] for d in child}),len(child))
-        desired(self.c['sharedRoot'],'svc','offline',writer='a',publishers=self.c['publishers']);self.until(lambda:self.state('svc')['phase']=='stopped')
+    def test_service_restart_has_direct_process_and_no_child_task(self):
+        d=dict(kind='Service',id='svc',publisher='operator',node='a',revision=1,version=1,desired='online',restart='always',argv=[sys.executable,'-c','pass'])
+        self.put(d);first=self.until(lambda:self.state('svc') and self.state('svc').get('runId'))
+        self.until(lambda:self.state('svc')['runId']!=first)
+        self.assertFalse(any(v['kind']=='Task' for _,v in self.o.objects.values()))
+        from runtime.services import set_intent
+        set_intent(self.c,d,'offline');self.until(lambda:self.state('svc')['phase']=='stopped')
+        self.assertTrue(self.state('svc')['waitObserved'])
     def test_service_offline_then_online(self):
-        d=dict(kind='Service',id='svc',publisher='operator',node='a',revision=1,version=1,desired='offline',restart='manual',task={'argv':[sys.executable,'-c','import time;time.sleep(100)']})
+        d=dict(kind='Service',id='svc',publisher='operator',node='a',revision=1,version=1,desired='offline',restart='manual',argv=[sys.executable,'-c','import time;time.sleep(100)'])
         self.put(d);self.o.round();self.assertEqual(self.state('svc')['phase'],'stopped')
-        desired(self.c['sharedRoot'],'svc','online',writer='a',publishers=self.c['publishers']);self.until(lambda:self.state('svc')['phase']=='running')
-        first=self.state('svc')['currentTask'];desired(self.c['sharedRoot'],'svc','offline',writer='a',publishers=self.c['publishers']);self.until(lambda:self.state('svc')['phase']=='stopped')
-        desired(self.c['sharedRoot'],'svc','online',writer='a',publishers=self.c['publishers']);self.until(lambda:self.state('svc')['phase']=='running' and self.state('svc')['currentTask']!=first)
+        from runtime.services import set_intent
+        set_intent(self.c,d,'online');self.until(lambda:self.state('svc')['phase']=='running')
+        first=self.state('svc')['runId'];set_intent(self.c,d,'offline');self.until(lambda:self.state('svc')['phase']=='stopped')
+        set_intent(self.c,d,'online');self.until(lambda:self.state('svc')['phase']=='running' and self.state('svc')['runId']!=first)
     def test_kind_not_path(self):
         self.put(self.task(),self.base/'shared/anything/else/declaration.json');self.until(lambda:self.state('task') and self.state('task')['phase']=='succeeded')
     def test_duplicate_identity_blocks(self):

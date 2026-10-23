@@ -130,7 +130,7 @@ class Git:
         env = dict(self.env)
         if protocol == 'ssh':
             require('sshConfig' in source, 'remote SSH source requires sshConfig reference')
-            config = Path(source['sshConfig'])
+            config = Path(source['sshConfig']).expanduser()
             require(config.is_file(), 'SSH config reference unavailable')
             ssh = shutil.which('ssh')
             require(ssh is not None, 'missing SSH tool')

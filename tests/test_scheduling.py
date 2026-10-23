@@ -20,6 +20,7 @@ class Scheduling(unittest.TestCase):
         self.root=self.base/'shared';self.engines=[]
         for node in ('a','b'):
             c=dict(node=node,sharedRoot=str(self.root),privateRoot=str(self.base/node),python=sys.executable,home=str(self.base),path=os.environ['PATH'],publishers={'operator':'a','rund-a':'a','rund-b':'b','scheduler':'a'},version=1,admission={'publisher':'scheduler'})
+            c.update(configRoot=str(self.base/'config'),servicesRoot=str(self.base/'config/objects/services'))
             write(self.base/(node+'.json'),c)
             self.engines.append(Engine(c))
         self.policy=dict(nodeConfig=str(self.base/'a.json'),publisher='scheduler',maxConcurrent=2,interval=.02)
@@ -99,26 +100,34 @@ class Scheduling(unittest.TestCase):
         self.scheduler.close();self.scheduler=None
         config=self.base/'scheduler.json';write(config,self.policy)
         declaration=dict(kind='Service',id='scheduler-service',publisher='operator',node='a',revision=1,
-                         version=1,desired='online',restart='always',task=dict(argv=[sys.executable,'-B',
-                         str(Path(__file__).resolve().parents[1]/'tools/scheduler.py'),'--config',str(config)]))
-        publish(self.root,declaration,writer='a',publishers=self.engines[0].c['publishers'])
-        self.put('first','b',['repo'])
-        self.until(lambda:self.state('first') and self.state('first')['phase']=='running')
-        child=get(self.root,'scheduler-service')[1]['currentTask']
-        self.assertNotIn('resources',get(self.root,child)[0])
-        desired(self.root,'scheduler-service','offline',writer='a',publishers=self.engines[0].c['publishers'])
-        self.until(lambda:get(self.root,'scheduler-service')[1]['phase']=='stopped')
-        self.assertTrue(self.state(child)['waitObserved'])
-        self.put('second','a',[]);self.rounds()
-        self.assertEqual(self.state('second')['phase'],'queued')
-        self.assertEqual(self.state('first')['phase'],'running')
-        first_process=self.state('first')['process']
-        grants=read(admission_path(self.engines[0].c))['grants']
-        desired(self.root,'scheduler-service','online',writer='a',publishers=self.engines[0].c['publishers'])
+                         version=1,desired='online',restart='always',argv=[sys.executable,'-B',
+                         str(Path(__file__).resolve().parents[1]/'tools/scheduler.py'),'--config',str(config)])
+        from runtime.services import publish as put_service,get as get_service,set_intent
+        c=self.engines[0].c;put_service(c,declaration)
+        self.put('first','b',['repo']);self.until(lambda:self.state('first') and self.state('first')['phase']=='running')
+        run=get_service(c,'scheduler-service')[1]['runId']
+        set_intent(c,declaration,'offline');self.until(lambda:get_service(c,'scheduler-service')[1]['phase']=='stopped')
+        self.assertTrue(get_service(c,'scheduler-service')[1]['waitObserved'])
+        self.put('second','a',[]);self.rounds();self.assertEqual(self.state('second')['phase'],'queued')
+        first_process=self.state('first')['process'];set_intent(c,declaration,'online')
         self.until(lambda:self.state('second')['phase']=='running')
         self.assertEqual(self.state('first')['process'],first_process)
-        self.assertIn('first',grants)
-        self.assertIn('first',read(admission_path(self.engines[0].c))['grants'])
-        self.assertNotEqual(get(self.root,'scheduler-service')[1]['currentTask'],child)
+        self.assertNotEqual(get_service(c,'scheduler-service')[1]['runId'],run)
+        self.assertFalse(any(d.get('service') for _,d in self.engines[0].objects.values()))
+
+    def test_services_share_resource_grants_without_child_tasks(self):
+        from runtime.services import publish as put_service,get as get_service,set_intent
+        def state(node,tid):return get_service(self.engines[node].c,tid)[1]
+        ds=[]
+        for i,node in enumerate(('a','b')):
+            d=dict(kind='Service',id='svc-'+node,publisher='operator',node=node,revision=1,version=1,desired='online',restart='manual',
+                   resources=['exclusive'],argv=[sys.executable,'-c','import time;time.sleep(100)'])
+            put_service(self.engines[0].c,d);ds.append(d)
+        self.until(lambda:state(0,'svc-a') and state(0,'svc-a')['phase']=='running')
+        self.assertEqual(state(1,'svc-b')['phase'],'queued')
+        set_intent(self.engines[0].c,ds[0],'offline')
+        self.until(lambda:state(1,'svc-b')['phase']=='running')
+        self.assertTrue(state(0,'svc-a')['waitObserved'])
+        self.assertFalse(any(d['kind']=='Task' for _,d in self.engines[0].objects.values()))
 
 if __name__=='__main__':unittest.main()

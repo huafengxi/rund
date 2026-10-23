@@ -7,10 +7,12 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from runtime.config import node_config
 from runtime.store import read,require
+from runtime.process import expand
 
 
 def command(path, action):
     link=read(path);c=node_config(link['nodeConfig'])
+    link={k:expand(v,c,'sync') if isinstance(v,str) else v for k,v in link.items()}
     for key in ('tool','remote','probeRoot','remoteProbeRoot','cycleLock','sshConfig'):
         require(key in link,'missing sync '+key)
     argv=[c['python'],'-B',link['tool'],'watch',c['sharedRoot'],link['remote'],

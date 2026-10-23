@@ -1,65 +1,49 @@
 # 声明对象与本机执行合同
 
-Service 是持续监督对象；每次执行均为独立 Task。rund、scheduler 和应用均使用同一声明合同。Task 是唯一持有进程身份和实际 wait 的执行对象。完整字段和机制由 runtime/config.py 校验，运行数据由 runtime/engine.py 生成。
+rund 是直接运行的节点底座。Service 表达持续运行意图并直接拥有进程状态；Task 表达一次性工作。声明校验由 runtime/config.py 定义，运行状态由 runtime/engine.py 写入。
 
 ## 文件与写权
 
-共享根默认用 services/<id>/、tasks/<id>/ 组织对象，各含 declaration.json 和 state.json。处理只依据 kind、id、node，不从路径推断语义或节点。id 全局唯一；相同身份多路径拒绝。声明由 publisher 映射的节点单写，状态由 node 上负责该对象的唯一执行者单写。配置附件由指定发布节点单写。同步副本只读，不能覆盖本机原件或取得执行权。
+机制源码直接运行 Git checkout。配置仓的 rund.json 为共用配置，host-id 将系统 hostname 映射到稳定节点 ID；objects/services/<id>/declaration.json 保存 Service，objects/tasks/<id>/declaration.json 可保存静态 Task，objects/configs/ 保存附件。每个 rund 只执行 node 等于本节点的对象。
 
-私有根包含节点配置、rund 锁、接受记录、源码缓存、artifacts 及 tasks/<id> 中的日志和工作目录；不参加同步。共享根与私有根必须不相交。运行源码和机器配置由调用方注入，机制仓不保存部署值。
+动态 Task 的 declaration.json 位于 shared/tasks/<id>/，由 publisher 映射的原发布节点单写。两类对象的 state.json 均由目标节点单写，分别位于 shared/services/<id>/ 和 shared/tasks/<id>/。配置仓声明直接读取，不经过共享树发布；共享树中的 Service 声明仅供历史查询，不参与执行。配置仓与共享协议出现同 ID Task 时正文必须一致。
 
-声明 revision 每次修改递增；状态由来源写者经串行链路覆盖副本，不按墙钟或 mtime 决定权威。Task 终态副本同样冻结。Service version 单独表示执行定义版本。
+id 全局唯一；声明修改须提高 revision；相同 revision 的内容必须一致。Task 终态整份 state.json 冻结。同步依据原写者与 replica 属组传输，副本不能取得写权。shared 与 local 不相交；密钥、进程锁、日志、源码缓存、工作目录和应用私有数据保存在 local。
 
 ## 声明
 
-公共必需字段：kind、id、publisher、node、revision。可选 name 用于显示，不决定身份。
+公共必需字段为 kind、id、publisher、node、revision，可选 name 为显示和本机 Service 选择名称。
 
-| 字段 | 类型与含义 |
+| 字段 | 合同 |
 | --- | --- |
-| kind | `Service` 或 `Task` |
-| id | 全局唯一身份；与 publisher、node 一经发布不可修改 |
-| publisher | 声明发布者，由节点配置 publishers 映射到唯一写入节点 |
-| node | 唯一执行节点，也是状态写入节点 |
-| revision | 正整数；内容变化必须递增，同 revision 只接受完全相同的正文 |
-| name | 可选非空显示名；Service 的本机 CLI 可按 name 或 id 选择 |
+| kind | Service 或 Task |
+| id | 全局唯一身份，与 publisher、node 一经接受不可改变 |
+| publisher | 声明写者，由共用配置 publishers 映射到原发布节点 |
+| node | 唯一执行节点及状态写者 |
+| revision | 正整数；每次修改递增 |
+| name | 可选非空显示名 |
+| argv | 两类对象均必需；非空字符串数组，直接执行 |
+| needs | 可选本机文件路径数组，全部为普通文件后才启动 |
+| cwd | 可选，默认当前执行的私有工作目录 |
+| env | 可选字符串映射，覆盖基础环境 |
+| resources | 可选全局资源数组；省略表示独立执行，空数组表示只占并发名额 |
 
-Task 必需 desired、argv；可选 needs、cwd、env、resources、cancelMode、service。desired 为 run/cancel，仅允许 run 转 cancel；除 revision、desired、取消模式外的执行定义发布后不可变。取消发布后模式固定。needs 为本机文件路径，全部在场才启动；缺失时等待，取消不等待依赖。argv 无 shell。cwd 默认任务工作目录，环境从显式节点 HOME/PATH 与声明 env 构造，不继承调用者身份。service 引用生成它的 Service id、version、declarationDigest。
+Task 的 desired 为 run/cancel，可选 cancelMode 为 terminate/kill，默认 terminate。除 revision、desired、cancelMode 外，发布后的执行定义不可变；取消不可撤回，再次取消不改变模式。历史 Task 的 service 引用保留为原始执行出处。
 
-Service 必需 version、desired、restart、task；可选 probe。desired 为 online/offline；restart 为 manual/on-failure/always；task 是 argv、needs、cwd、env、resources 模板。修改模板、策略或探针须提高 version。每次启动复制模板生成新 Task；原 Task 状态未知或负载未收口时阻塞替代执行。offline 取消当前 Task 并停止后续创建。
+Service 额外必需 version、desired、restart，可选 probe。执行字段直接位于 Service 正文。
 
-| 执行字段 | 约束与默认值 |
+| Service 字段 | 合同 |
 | --- | --- |
-| argv | 必需的非空字符串数组；直接执行，不经过 shell |
-| needs | 文件路径数组，默认 `[]`；目标节点逐项检查普通文件存在 |
-| cwd | 可选工作目录，默认 `${work}` |
-| env | 字符串映射，默认 `{}`；覆盖显式基础环境，不继承 CLI 环境 |
-| resources | 可选全局资源数组；省略表示独立执行，`[]` 表示只占并发名额 |
+| version | 正整数；执行定义、策略或探针变化须提高版本 |
+| desired | online/offline，作为配置默认意图 |
+| restart | manual/on-failure/always |
+| probe | `{http,timeout?}` 或 `{cmd,expect?,timeout?}`，互斥 |
 
-Task 的 cancelMode 默认为 terminate，先 TERM，等待约三秒后 KILL；kill 直接请求 KILL。取消已经发布时，再次取消不改变模式。service 为 rund 生成的父 Service 引用，包含 id、version、declarationDigest。
+manual 在进程退出后保持停止，on-failure 在失败后重试，always 在退出后重试。重试指数退避为 0.5 至 30 秒。HTTP 探针以请求可达为成功，包括 HTTP 错误响应；命令探针要求退出码 0 且 stdout 包含 expect。探针用于查询健康，不触发自动重启。
 
-Service 的 version 为正整数，独立于 revision；单纯启停只改变 desired 和 revision。manual 在本次运行终结后保持停止；on-failure 只对 failed 自动重试；always 对任意终态重试。自动重试采用指数退避，当前范围为 0.5 至 30 秒。探针只用于 CLI 状态检查，不触发 rund 自动重启：HTTP 探针检查请求可达（包括 HTTP 错误响应），命令探针要求退出码 0 且 stdout 包含 expect（默认空串）。probe 使用 `{http,timeout?}` 或 `{cmd,expect?,timeout?}`，两类互斥。
+本机 Service 启停意图位于 local/services/<id>/intent.json，包含 declarationDigest 和 desired。摘要匹配当前声明才生效；配置声明变化后使用其默认 desired。start 是幂等操作，显式重启使用 stop、start。
 
-路径占位符：${shared}、${private}、${artifacts}、${work}、${runtime}。needs 不引用其他 Task 身份。产物准备程序在独立 Task 中执行，完整产物原子发布后最后发布完成文件；成功发布的产物不可变，被引用期间不得清理。
-
-占位符在 argv、needs、cwd、env 值中展开；`~` 和 `~/` 使用节点 home。基础环境包含 HOME、PATH、LC_ALL、TMPDIR、PYTHONDONTWRITEBYTECODE。`${work}` 和 TMPDIR 属于当前 Task 私有目录。
-
-以下为独立 Task 与 Service 的声明示例；node 与 publisher 由调用方配置映射：
-
-```json
-{
-  "kind": "Task",
-  "id": "example-task",
-  "publisher": "operator",
-  "node": "node-a",
-  "revision": 1,
-  "desired": "run",
-  "argv": ["/usr/bin/true"],
-  "needs": ["${artifacts}/example/ready.json"],
-  "cwd": "${work}",
-  "env": {},
-  "resources": ["example-repository"]
-}
-```
+路径占位符为 `${shared}`、`${private}`、`${artifacts}`、`${work}`、`${runtime}`、`${config}`、`${home}`、`${node}`。argv、needs、cwd、env 值支持展开，~ 和 ~/ 使用当前用户 home。基础环境包含 HOME、PATH、LC_ALL、TMPDIR、PYTHONDONTWRITEBYTECODE；work 与 TMPDIR 属于本次执行私有目录。
 
 ```json
 {
@@ -72,116 +56,79 @@ Service 的 version 为正整数，独立于 revision；单纯启停只改变 de
   "version": 1,
   "desired": "online",
   "restart": "on-failure",
-  "task": {
-    "argv": ["/bin/sleep", "3600"],
-    "needs": [],
-    "cwd": "${work}",
-    "env": {}
-  }
+  "argv": ["/bin/sleep", "3600"],
+  "needs": [],
+  "env": {}
 }
 ```
+
+一次性 Task 使用相同执行字段，将 kind 改为 Task、desired 改为 run，并省略 version、restart、probe。
 
 ## 状态
 
-公共字段：kind、id、node、declarationDigest、updatedAt、phase、reason。摘要对应已接受声明，时间仅作观测说明。
-
-Task 状态另含 process、startedAt、finishedAt、exitCode、signal、waitObserved；process 保留原生 boot、start、pid、uid、pgid、sid 身份。阶段为 accepted、preparing、queued、starting、running、canceling、unknown、succeeded、failed、canceled。后三者为终态，整份 state.json 冻结。取消记录必要的信号阶段和截止时间；只有真实 wait 和组收口后才能完成已启动 Task。启动前失败或取消可无进程、无 wait；未知身份或旧 rund 丢失 wait 不伪造终态。
-
-Service 状态另含 currentTask、nextStartAt、restartCount；nextStartAt 为 Unix 秒或 null。阶段为 stopped、starting、running、stopping、backoff、blocked。进程事实只存在关联 Task；currentTask 可在终态后保留。
+公共字段为 kind、id、node、declarationDigest、updatedAt、phase、reason；时间为带时区 ISO 字符串，仅作观测。
 
 | 状态字段 | 含义 |
 | --- | --- |
-| kind / id / node | 对应对象身份与执行节点 |
-| declarationDigest | 已接受声明的规范 JSON 摘要；终态 Task 保留最后冻结值 |
-| updatedAt / reason | 最近持久化时间与原因；时间为带时区 ISO 字符串 |
-| Task.process | 未 spawn 为 null；启动后包含 pid、start、boot、uid、pgid、sid |
-| Task.startedAt / finishedAt | 启动与终结时间，未发生时为 null |
-| Task.exitCode / signal | 正常退出码或终止信号；未知时为 null |
-| Task.waitObserved | 是否取得负责该 Task 的执行者持有的真实 wait 结果，初始 false |
-| Task.queuedAt | 进入全局队列的时间，按需出现 |
-| Task.observedAt | 持续运行观测时间，按需出现 |
-| Task.cancelRequested | 已实际发送取消信号时置 true，按需出现 |
-| Task.stopStep / stopDeadline | 取消阶段（1=TERM、2=KILL）与 Unix 秒截止时间，按需出现 |
-| Service.currentTask | 当前或最近一次子 Task id，初始 null |
-| Service.nextStartAt | 自动重试截止时间，初始 null |
-| Service.restartCount | 自动重试计数，初始 0 |
+| process | 启动前 null；启动后为 pid、start、boot、uid、pgid、sid |
+| startedAt / finishedAt | 启动与终结时间，未发生时 null |
+| exitCode / signal | 正常退出码或终止信号，未知时 null |
+| waitObserved | 是否取得负责执行者持有的真实 wait 结果 |
+| queuedAt | 按需出现的排队时间 |
+| stopStep / stopDeadline | 按需出现的信号阶段和 Unix 秒截止时间 |
+| Service.runId | 当前或最近一次运行标识，关联日志目录，不是 Task |
+| Service.runVersion | 当前或最近一次运行采用的 Service 版本 |
+| Service.nextStartAt | 重试截止 Unix 秒或 null |
+| Service.restartCount | 自动重试计数 |
 
-Task 的常见路径为 `accepted → preparing → queued → starting → running → succeeded/failed`；文件齐备或无需全局放行时跳过相应阶段。accepted 也是初始内存状态，不保证单独持久化。取消可在 spawn 前直接进入 canceled，或经 canceling 在真实 wait 和组收口后终结。unknown 表示事实不充分，不等同 failed。Service.phase=running 只表示关联 Task 正在运行，CLI 的 online/ok 还会检查进程身份、版本及探针。
+Task 阶段为 accepted、preparing、queued、starting、running、canceling、unknown、succeeded、failed、canceled；后三者为冻结终态。启动前取消不等待文件或 grant；运行中取消先 TERM，约三秒后 KILL，kill 模式直接 KILL。已启动执行须取得真实 wait 且进程组收口才能完成。丢失身份或 wait 的结果保持 unknown，不凭 PID 消失伪造退出码。
 
-每次更新原子替换整份文件。执行者重启读取已接受声明及原状态，starting/unknown 不自动重放 spawn。rund 自身也是普通 Service，每次运行生成普通 Task，由外部 bootstrap 执行者持有其真实 wait；替换 rund 前收口其监督的 Task。
+Service 阶段为 stopped、preparing、queued、starting、running、stopping、backoff、unknown。offline 或版本变化先收口原进程，再停止或启动新版本；未知结果阻塞重复启动。每次运行的状态和日志保存在 local/services/<id>/runs/<runId>/，不创建子 Task。Task 日志和工作目录位于 local/tasks/<id>/。
+
+status 的 actual、run_version、state、drift 是派生健康视图，检查进程身份、rund 存活、运行版本和探针。它与持久化 phase 分工不同。
 
 ## 配置与凭据
 
-普通配置与密文凭据可作为版本化共享文件；本机密钥不进入同步根。应用或普通启动包装器在内存解密并 exec 应用，核心不解释密文或加载 secret。声明和状态只保存引用；包装器不回显值或将其写入同步文件。bootstrap 通过显式私有引用提供工具与密钥。轮换发布新配置路径并更新 Service 模板，旧 Task 不被修改。
+共用配置格式为 rund/v1，hosts 指向配置仓内的 hostname 映射文本；每行 hostname node，支持空行与 # 注释。hostname 忽略大小写；未登记或重复映射必须报错。home 从当前用户获取，运行根为配置仓父目录，sharedRoot/privateRoot 分别为其 shared/local，机制源码路径由当前 checkout 确定。
+
+共用配置保存 python、path、publishers、admission、interval 和可选 syncConfig；支持 `${home}`、`${root}`、`${config}`、`${node}` 展开。admission 只引用可信调度发布者；并发策略属于 scheduler 的配置。源码版本由 checkout 的 Git revision 追踪；更换机制版本前先停止节点负载。
+
+明文密钥不进入共享树。应用包装器可读取配置仓附件、在内存加载或解密凭据再 exec，rund 核心不解释 secret。业务源码由普通准备 Task 获取固定 Git 对象，产物完成文件最后发布；已完成产物不可变。源码计划的 sshConfig 可为绝对路径或 ~/ 路径。
 
 ## Bootstrap
 
-新节点的常规入口为 `python -B tools/bootstrap.py --deployment <配置 checkout> [--node <id>]`。第三步包含固定源码导出、底座安装、原发布者声明提交、首次同步、普通 rund Service 启动和本节点全部声明服务的收敛检查。`--check` 校验输入而不安装或启停；`--timeout` 控制启动后的收敛等待秒数，默认 300。hostname 不在配置映射中时要求显式选择节点。
+调用方将机制仓与配置仓分别 checkout 到 ~/.rund/rund 和 ~/.rund/config，执行 `~/.rund/rund/runctl start`。前台使用 `runctl run` 或 `python -B rund.py`。默认共用配置为 ~/.rund/config/rund.json，测试与独立实例可用 --config 显式指定。
 
-配置 checkout 根的 bootstrap.json 格式为：
+启动直接读取配置，创建运行目录、单实例锁和自身进程记录，进入协调循环。rund 不作为 Service 或 Task，也没有常驻父进程监督要求。start 返回只说明 rund 已启动；其他服务就绪由 status 独立查询。同步服务、scheduler 和源码准备按普通声明执行，启动不依赖预先同步或远端声明发布节点在线。
 
-```json
-{
-  "format": "rund-bootstrap/v1",
-  "runtime": "runtime-code",
-  "objects": "objects",
-  "sources": [
-    {"alias": "runtime-code", "repository": "ssh://source.example/project/runtime.git", "revision": "0123456789012345678901234567890123456789", "requires": []},
-    {"alias": "transport", "repository": "ssh://source.example/project/transport.git", "revision": "1234567890123456789012345678901234567890", "requires": []}
-  ],
-  "hosts": {"host.example": "node-a"},
-  "nodes": {"node-a": {"config": "nodes/node-a.json", "sync": "nodes/node-a.sync.json", "requiredFiles": ["/home/user/.ssh/config"]}}
-}
-```
-
-hosts 可内嵌 hostname 到 node 的对象，或引用相对 checkout 根的文本映射文件；文本每行 hostname node，支持空行与 # 注释。配置路径相对 checkout 根且不能越界。sources 使用普通固定 Git 源码计划合同；runtime 指定 rund 源码 alias，所有底座源导出至 prefix/runtime/<revision>。机制 checkout 可提供对应固定 Git 对象，运行时不从可变 checkout 启动。节点 privateRoot 为 prefix/local；runtimeSource 必须匹配所选固定 revision，syncConfig 为 prefix/local/sync.json，运输配置的 nodeConfig 指向 prefix/local/node.json。
-
-objects 保存普通 Service/Task 声明和 configs/<摘要>.json，不包含运行状态。bootstrap 按 publisher 映射提交本节点声明：本机原发布者直接调用协议，远端原发布者经 SSH 使用其已安装协议；先由原节点同步，再由目标节点同步。远端原发布节点须已安装；新集群先启动声明原发布节点。配置附件摘要必须匹配，声明保留输入 revision 和 desired，过期或冲突由正常协议拒绝。bootstrap 不通过写入外国原件规避发布者权威。
-
-重复执行同一配置保持既有 rund Task；已安装底座配置或运输配置不同则要求显式升级。源导出与中间产物保留以供重试。只有本节点非空 Service 集合包含 bootstrapService，且所有声明服务版本、desired 和健康符合预期、drift=0、诊断为空时返回成功。离线声明同样参加核验。机器须已具备 Python、Git、SSH、运输所需系统工具与权限，以及配置引用的私有凭据；业务依赖由其普通准备 Task 或部署前提提供。
-
-低层安装入口仍为 tools/bootstrap.py --prefix <目录> --node-config <文件> --runtime-source <固定目录> --revision <SHA>，--upgrade 允许已有安装根。该接口只写 prefix/local/node.json、共享/私有目录及 bin/runctl；不导出源码、不生成运输配置或发布声明。它仅校验 revision 为 40 位小写 SHA，固定源码与 SHA 的对应由调用方保证。已有运行节点升级须先经声明收口负载。
-
-node.json 的 bootstrapService 引用一个普通 Service id。runctl start <该 Service> 在必要同步后启动外部 bootstrap；bootstrap 与节点 rund 使用同一套 Service/Task 执行状态机，分别只处理该 Service 及其子 Task、其余本机对象。名称不参与执行分派，现场显示名为 rund。同步 Service 直接执行预先提供的固定工具，无业务源码依赖。后续发布准备 Task 与业务 Service；准备工具获取固定源码并发布本地产物，业务 Task 仅等待 needs 文件。工具、端点、发布者映射及密钥位置由调用方提供。
+启动前须具备 Python、Git 以及声明实际引用的系统工具和凭据。系统开机启动由调用方选择外部启动入口。运行过程不会安装机制源码、复制节点配置或生成 runctl 副本。
 
 ## 统一入口
 
-runctl status [name/id] 查询；start/stop <Service> 修改原发布者 desired 并等待实际状态；cancel <Task> [--mode kill] 发布取消。publish --input <file> 由声明原发布者执行。run <Service> 在前台执行节点配置所引用 Service 的外部 bootstrap；现场使用 runctl run rund。Makefile 不是协议约束。客户端不能直接执行或发信号给受管负载，不能回写 state。远端修改经 SSH 路由到声明原发布者；目标机仅执行自己的对象。
-
-| 命令（全局支持 `--config <node.json>`） | 实际行为 |
+| 命令（全局支持 --config） | 行为 |
 | --- | --- |
-| status | 本节点 Service 汇总（包含 rund）；返回 node、total、drift、services、diagnostics、blockedTargets |
-| status <Service name/id> | 本节点单 Service 摘要：version、run_version、desired、actual、state、pid、task、note 等 |
-| status <Task id> | 返回共享树中的 declaration 和 state，可读取其他节点副本 |
-| start / stop <Service name/id> | 仅选择本机 Service；向原发布者修改 desired，触发同步，最多等待约 120 秒；stop 还等待子 Task 收口 |
-| cancel <Task id> [--mode terminate\|kill] | 发布取消意图，返回声明，不等待终态 |
-| publish --input <file\|-> | 本机作为原发布者校验并发布声明；`-` 读取 stdin；输出声明路径 |
-| desired <id> <value> [--mode terminate\|kill] | 底层声明意图接口；可路由原发布者，不等待实际执行 |
-| sync | 配置 syncConfig 时执行一次 push/pull；未配置时无操作 |
-| run <Service name/id> | 前台运行 bootstrapService 引用的普通 Service 的外部监督；现场为 run rund |
+| start | 后台启动本节点 rund，已运行时复用 |
+| run | 当前进程前台运行 rund |
+| stop | 检查一次性 Task 已终结，再请求 rund 收口全部 Service 并退出 |
+| status | 节点与 Service 汇总，包含独立 rund 状态、total、drift、services、diagnostics、blockedTargets |
+| status <Service name/id> | 本节点 Service 摘要，包含 version、run_version、desired、actual、state、pid、run、note |
+| status <Task id> | Task 声明与状态，可查询同步副本及历史 Task |
+| start / stop <Service name/id> | 本节点 Service 启停，保存本机意图，等待约 120 秒内收敛 |
+| cancel <Task id> [--mode terminate\|kill] | 向原发布者提交取消意图，返回声明，不等待终态 |
+| publish --input <file\|-> | Task 发布到共享协议；Service 写入配置仓，配置传播遵循配置仓 Git 工作流 |
+| desired <id> <value> [--mode terminate\|kill] | 底层意图入口，Task 可经 SSH 路由原发布者 |
+| sync | 有 syncConfig 时执行一次同步 |
 
-start/stop 超时表示意图已发布而执行仍待完成，不能据此认定声明回滚。跨节点启停应在目标节点运行 CLI；原发布者路由使用 publishers 中的节点名作为 SSH 目标。status 不主动同步，其副本新鲜度由同步链路决定。
-
-原发布节点写入期望状态后主动同步一次，目标节点再同步并等待执行；两侧 CLI 运输都不依赖 rund 或 shared-sync 常驻进程在线。bootstrap 停启期间同样通过这条路径送达意图。
-
-停止 bootstrapService 所引用的 rund 前，CLI 检查其余本机 Task 已终结。rund 观察自身停用、版本替换或子 Task 取消意图后暂停新执行；负载收口时在私有诊断写入与当前 Service 声明摘要绑定的 quiescentFor。外部 bootstrap 核对进程身份和该确认后才发送取消信号，取得真实 wait 后冻结 rund Task 终态并退出。前台 bootstrap 收到 TERM/INT 时同样经声明停止并等待收口。
-
-start 是设置 online 的幂等操作，不承诺创建新一代；需要显式重启时顺序执行 stop、start。Service 子 Task 的 resources 在模板中指定，遵循与独立 Task 相同的放行语义。
-
-node.json 是本机公共配置权威；普通同步配置通过 nodeConfig 引用它，只保存运输字段。rund 与外部 bootstrap 的诊断分别在 runtime.json、bootstrap.json，接受记录分别在 accepted.json、bootstrap-accepted.json。两执行者按 bootstrapService 及其子 Task 划分写权；新生成子 Task 的发布者分别为 rund-<node>、bootstrap-<node>。执行事实以共享 Service/Task state 为准。源码准备计划只描述固定 sources，不复用执行声明；Git 缓存与最终 artifacts 之间没有第二套代码或 manifest 目录。
+客户端不直接 spawn/kill 受管负载或回写状态；节点 rund 的启动与停止由 runctl 直接执行。节点停止期间暂停新执行，Service 逐项收口；未知进程保持阻塞。停止前已有一次性 Task 须先执行完或取消。服务 start/stop 超时表示意图已记录，不能据此断言回滚。status 不主动同步。
 
 ## 全局执行放行
 
-scheduler 是普通 Service，其 task.argv 执行 `tools/scheduler.py --config <配置附件>`，模板省略 resources，因此启动不依赖自身放行。独立配置字段为 nodeConfig、publisher、maxConcurrent，可选 interval（默认 0.2 秒）。publisher 必须映射到当前部署节点，本机 scheduler.lock 排除第二个写者。部署节点由 Service.node 指定，各节点 rund 职责相同。
+scheduler 是普通 Service，argv 执行 tools/scheduler.py，省略 resources 以独立启动。配置包含 nodeConfig、publisher、maxConcurrent 和可选 interval。publisher 必须映射到其执行节点；scheduler.lock 保证唯一写者。
 
-节点配置 `admission={"publisher":"<调度发布者>"}` 只指定可信放行来源，经 publishers 映射定位原写者；节点不保存并发或排队策略。scheduler 单写 shared/scheduling/state.json，字段为 node、grants、maxConcurrent、updatedAt；grants 保存 Task id 与不可变执行定义摘要的绑定。rund 只读并检查来源节点和摘要，取得 grant 后负责本机执行。资源名为不透明的全局字符串，按原样比较；机器隔离由调用方命名。
+scheduler 单写 shared/scheduling/state.json，包含 node、grants、maxConcurrent、updatedAt。grants 绑定执行对象 ID 与执行定义摘要；节点只读检查来源和摘要。资源名按原样比较，机器隔离由调用方命名。
 
-Task 显式携带 resources 时参加全局名额分配，[] 表示只占名额；省略时独立执行，用于底座与常驻服务。目标 rund 在文件齐备后写 queued、queuedAt，获得匹配 grant 才 spawn。放行者按排队时间和 id 扫描，资源被占者不阻塞其它候补。只有 Task 终态释放 grant；unknown、未执行和离线节点均保留占位。存在非终态执行而放行记录丢失时拒绝新放行，须恢复记录后继续。
-
-scheduler 停止时保留持久化 grant，已运行 Task 继续由各节点 rund 监督；已有匹配 grant 的 Task 仍可启动，新候补等待新 grant。scheduler 通过普通 Service 生命周期独立重启，重新读取并保留未终态占位，不要求重启节点 rund。
+显式 resources 的对象在文件齐备后进入 queued，匹配 grant 后启动。Task 终态释放 grant；Service 停止或进入退避、准备阶段后释放，下一次执行重新排队。unknown、缺失事实和离线副本保留占位。scheduler 停止不影响已运行进程；新候补等待放行，重启后沿用持久化记录。
 
 ## 共享树运输
 
-shared 同时容纳执行对象与 agents 业务树。agents、configs、gc、scheduling 为保留命名空间，rund 不扫描其中的业务 declaration.json。其余目录内仍按 kind 处理执行声明。
-
-tools/sync.py 调用节点 sync.json 中显式指定的固定运输工具。运输采用 agents-sync 的原件/replica 属组协议和 neutral hub；同步器不解析执行或消息语义。一次性与常驻同步共享 cycleLock 串行完成 push/pull。配置包含 nodeConfig、tool、remote、probeRoot、remoteProbeRoot、cycleLock、sshConfig 及周期参数。底座启动前必须备好工具和 scratch。
+shared 容纳 Task 协议、Service 状态、调度记录和 agents 业务文件。agents、configs、gc、scheduling 为保留业务命名空间，不扫描其中的业务 declaration.json。工具 tools/sync.py 读取配置仓的运输配置，执行调用方固定的 agents-sync 工具；源码可由普通准备 Task 提供。常驻和一次性同步使用同一个 cycleLock 串行传输。

@@ -60,7 +60,7 @@ def validate(plan):
         fields(src, ('alias', 'repository', 'revision', 'requires'), ('lockFiles', 'sshConfig'))
         if 'sshConfig' in src:
             text(src['sshConfig'])
-            require(Path(src['sshConfig']).is_absolute(), 'absolute SSH config reference required')
+            require(Path(src['sshConfig']).expanduser().is_absolute(), 'absolute SSH config reference required')
         name(src['alias'])
         require(src['alias'].casefold() not in aliases, 'conflicting source alias')
         aliases[src['alias'].casefold()] = src

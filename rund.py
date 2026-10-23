@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Node runtime payload, executed as an ordinary Service Task."""
+"""Direct foreground node runtime."""
 import argparse
 from pathlib import Path
 from runtime.config import node_config
@@ -8,7 +8,7 @@ from runtime.engine import Engine
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--config',required=True,type=Path)
+    parser.add_argument('--config',type=Path,default=Path.home()/'.rund/config/rund.json')
     args=parser.parse_args()
     engine=Engine(node_config(args.config))
     try:engine.run()

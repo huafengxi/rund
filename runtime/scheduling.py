@@ -3,21 +3,20 @@ import os
 import signal
 import time
 from pathlib import Path
-from .config import FINAL, discover, node_config
+from .config import FINAL, node_config
+from .services import objects,wanted
 from .store import read, write, now, require, lock
 from .admission import admission_path, execution_digest
 
 
 def reconcile(c, policy):
-    found, errors = discover(c['sharedRoot'])
-    if errors:
-        raise ValueError('; '.join(errors))
+    found = objects(c)
     path = admission_path(c)
     if not path.exists():
         for p,d in found.values():
             sp=p.with_name('state.json')
-            if d['kind']=='Task' and 'resources' in d and sp.exists():
-                if read(sp)['phase'] in ('starting','running','canceling','unknown'):
+            if 'resources' in d and sp.exists():
+                if read(sp)['phase'] in ('starting','running','canceling','stopping','unknown'):
                     raise ValueError('restore missing admission record before scheduling')
     prior = read(path) if path.exists() else {'node': c['node'], 'grants': {}}
     require(prior['node'] == c['node'], 'scheduler record belongs to another node')
@@ -30,13 +29,13 @@ def reconcile(c, policy):
             return
         p, d = entry
         s = read(p.with_name('state.json')) if p.with_name('state.json').exists() else None
-        if s and s['phase'] in FINAL:
+        if s and (s['phase'] in FINAL or d['kind']=='Service' and s['phase'] in ('stopped','backoff','preparing')):
             del grants[tid]
         else:
             held.update(d.get('resources', []))
     queue = []
     for tid, (p, d) in found.items():
-        if d['kind'] != 'Task' or 'resources' not in d or tid in grants or d['desired'] != 'run':
+        if 'resources' not in d or tid in grants or d['desired'] != ('run' if d['kind']=='Task' else 'online'):
             continue
         sp = p.with_name('state.json')
         s = read(sp) if sp.exists() else None

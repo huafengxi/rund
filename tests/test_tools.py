@@ -22,13 +22,4 @@ class Tools(unittest.TestCase):
         b=Path(tempfile.mkdtemp(prefix='rund-bad-prepare-')).resolve()
         with self.assertRaises((ValueError,OSError)):build({'sources':[]},b/'artifact',b/'cache')
         self.assertFalse((b/'artifact/ready.json').exists())
-    def test_bootstrap_empty_root_and_runctl_status(self):
-        from tools.bootstrap import install
-        b=Path(tempfile.mkdtemp(prefix='rund-bootstrap-'));prefix=b/'node';source=Path(__file__).resolve().parents[1]
-        c=dict(node='fixture',sharedRoot=str(prefix/'shared'),privateRoot=str(prefix/'local'),python=sys.executable,home=str(b),path=os.environ['PATH'],publishers={'rund-fixture':'fixture'},version=1)
-        install(prefix,c,source,'a'*40)
-        p=subprocess.run([str(prefix/'bin/runctl'),'status'],capture_output=True,text=True)
-        self.assertEqual(p.returncode,0,p.stderr);self.assertEqual(json.loads(p.stdout)['services'],[])
-        with self.assertRaises(ValueError):install(prefix,c,source,'a'*40)
-
 if __name__=='__main__':unittest.main()

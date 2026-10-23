@@ -1,15 +1,15 @@
-# rund — 单写者对象与本机 Task 执行
+# rund — 节点执行底座
 
-本仓提供声明校验、节点执行、Task 进程监督、Service 策略、对象客户端及普通任务工具。机器、仓地址、工具、目录、同步端点与凭据引用由调用方提供。rund 自身是普通 Service，由外部 bootstrap 启动并监督；命令为 runctl start/stop/status rund，前台入口为 runctl run rund。默认运行根为 ~/.rund，节点配置为 ~/.rund/local/node.json；统一入口 runctl.py，正式合同见 [PROTOCOL.md](PROTOCOL.md)。
+本仓提供声明校验、节点执行、Service 进程监督、一次性 Task、对象客户端及普通任务工具。主机、仓地址、端点、凭据引用和业务装配由配置仓提供；公开机制仓只保存通用机制。
 
-runtime/config.py 定义声明；store.py 提供原子持久化；protocol.py 是轻量客户端；engine.py 协调 Service 与 Task；process.py/native.py 处理真实进程身份、wait 与组收口；cli.py 暴露安装节点操作。
+机制仓 checkout 位于 ~/.rund/rund，配置仓位于 ~/.rund/config。入口为 `runctl`；默认读取 ~/.rund/config/rund.json，通过 host-id 将系统 hostname 映射到节点 ID。新机器完成两个 checkout 后执行 `~/.rund/rund/runctl start`；`runctl run` 在前台运行。启动只读取配置并创建运行目录、锁和状态。完整字段与命令见 [PROTOCOL.md](PROTOCOL.md)。
 
-runtime/admission.py 供各节点只读检查 grant；runtime/scheduling.py 与 tools/scheduler.py 提供普通 scheduler Service，独立处理全局资源和并发策略。scheduler 配置与部署位置由调用方的 Service 声明及配置附件提供，不嵌入节点 rund。
+rund 是直接运行的节点程序。Service 是从配置仓读取的常驻程序声明，直接拥有进程状态；Task 是一次性执行对象，可来自配置仓或共享协议。两者共用进程启动、真实 wait、资源放行和取消逻辑。历史 Task 的终态文件冻结，未知结果不重放。
 
-共享对象各包含 declaration.json 和 state.json，声明与状态分别单写。Service 每次执行创建独立 Task；Task 通过 needs 等待本机文件。Task 终态状态冻结；未知事实不重放。节点锁、源码产物、日志、工作目录与密钥留在本机私有根。
+runtime/config.py 定义声明合同；services.py 解析共用配置与配置仓对象；engine.py 协调 Service 和 Task；process.py/native.py 处理原生进程身份、wait 与组收口；cli.py 提供节点与对象操作。Service 状态位于 shared/services/<id>/state.json，历次运行日志位于 local/services/<id>/runs/<runId>/。独立 Task 的声明和状态使用共享文件协议。
 
-tools/prepare.py、tools/env_exec.py、tools/sync.py 和 tools/external_exec.py 是普通 Task 的负载，分别完成固定源码准备、内存凭据注入、单写者运输和官方管理器适配。rund 不获取源码或解密凭据。源码准备只接受固定 sources 计划，直接校验 Git 对象并原子发布一份 artifact；源码缓存仅保存 Git 对象、Git 私有配置与锁。
+scheduler 是普通 Service，单写资源与并发放行记录；节点 rund 只检查 grant 和执行本机进程。tools/prepare.py、env_exec.py、sync.py、external_exec.py 分别负责固定业务源码准备、内存凭据注入、共享树运输和官方管理器适配。同步与业务准备按普通声明启动。
 
-新机器 checkout 本机制仓和调用方配置仓后，执行 `python -B tools/bootstrap.py --deployment <配置仓目录>`。配置仓的 bootstrap.json 选择节点、固定源码与声明；命令导出固定底座、安装入口、向原发布者提交声明并同步、执行普通 rund Service 的 start，等待本节点声明服务健康。`--node <id>` 显式选择节点，`--check` 只校验；配置格式与低层安装接口见 [PROTOCOL.md](PROTOCOL.md#bootstrap)。本仓不带真实部署计划或凭据。
+运行机制源码直接使用 checkout，升级前通过 runctl stop 收口负载，更新 checkout 后 start。配置仓保存期望配置，本机 start/stop Service 的意图保存在 local，绑定声明摘要；配置变化后使用新声明的默认 desired。配置仓不承载运行状态。
 
-机制测试使用 Python 标准库 unittest，入口 `python -B -m unittest discover -s tests -v`。测试创建自己的进程、仓与目录；真实五机安装及服务验证由调用方完成。历史变更由 Git 保存。
+测试入口为 `python -B -m unittest discover -s tests -v`，测试使用独立目录与进程。实际部署和跨机验收由调用方完成。

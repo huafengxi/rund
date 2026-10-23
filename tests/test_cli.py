@@ -1,160 +1,77 @@
-"""Installed CLI with a real runtime Service, processes and frozen terminal state."""
 import json
 import os
 from pathlib import Path
+import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from tools.bootstrap import install
+from runtime.config import node_config
+from runtime.cli import main
+from runtime.services import get
 from runtime.store import write,read
+
+SOURCE=Path(__file__).resolve().parents[1]
 
 class CLI(unittest.TestCase):
     def setUp(self):
-        self.base=Path(tempfile.mkdtemp(prefix='runctl-')).resolve();self.prefix=self.base/'node';self.root=self.prefix/'shared';self.bin=self.prefix/'bin/runctl'
-        c=dict(node='fixture',sharedRoot=str(self.root),privateRoot=str(self.prefix/'local'),python=sys.executable,home=str(self.base),path=os.environ['PATH'],publishers={'operator':'fixture','rund-fixture':'fixture','bootstrap-fixture':'fixture'},bootstrapService='runtime-fixture')
-        install(self.prefix,c,Path(__file__).resolve().parents[1],'a'*40)
-        self.publish(dict(kind='Service',id='runtime-fixture',name='rund',node='fixture',publisher='operator',revision=1,version=1,desired='offline',restart='always',task=dict(argv=[sys.executable,'-B','${runtime}/rund.py','--config','${private}/node.json'])))
-        self.call('start','rund')
-    def call(self,*args,good=True):
-        p=subprocess.run([str(self.bin),*args],capture_output=True,text=True,timeout=15)
-        if good:self.assertEqual(p.returncode,0,p.stderr)
-        return p
-    def tearDown(self):self.call('stop','runtime-fixture')
-    def publish(self,d):
-        f=self.base/'input.json';write(f,d);self.call('publish','--input',str(f))
-    def test_service_stop_waits_for_terminal_task_and_new_layout(self):
-        self.publish(dict(kind='Service',id='demo',name='demo',node='fixture',publisher='operator',revision=1,version=1,desired='offline',restart='manual',task=dict(argv=[sys.executable,'-c','import time;print("running",flush=True);time.sleep(60)'])))
-        running=json.loads(self.call('start','demo').stdout);self.assertEqual(running['actual'],'online')
-        self.call('stop','demo');state=read(self.root/'tasks'/running['task']/'state.json');self.assertEqual(state['phase'],'canceled');self.assertTrue(state['waitObserved'])
-        private=self.prefix/'local';self.assertTrue((private/'tasks'/running['task']/'stdout').is_file());self.assertTrue((private/'tasks'/running['task']/'work/tmp').is_dir());self.assertFalse((private/'health.json').exists());self.assertIn('diagnostics',read(private/'runtime.json'))
-        self.assertFalse((self.prefix/'Makefile').exists());self.assertFalse((self.prefix/'runtime.json').exists());self.assertFalse((self.prefix/'workspace').exists())
-    def test_cancel_before_dependencies_and_runtime_stop_guard(self):
-        self.publish(dict(kind='Task',id='waiting',node='fixture',publisher='operator',revision=1,desired='run',argv=[sys.executable,'-c','raise AssertionError("must not execute")'],needs=[str(self.base/'missing')]))
-        end=time.monotonic()+5
-        while not (self.root/'tasks/waiting/state.json').exists() and time.monotonic()<end:time.sleep(.02)
-        self.assertNotEqual(self.call('stop','rund',good=False).returncode,0)
-        self.call('cancel','waiting')
-        while read(self.root/'tasks/waiting/state.json')['phase']!='canceled' and time.monotonic()<end:time.sleep(.02)
-        self.assertEqual(read(self.root/'tasks/waiting/state.json')['phase'],'canceled')
-
+        self.temp=tempfile.TemporaryDirectory(prefix='rund-direct-');self.base=Path(self.temp.name)
+        self.repo=self.base/'config';self.config=self.repo/'rund.json'
+        write(self.config,dict(format='rund/v1',hosts='host-id',python=sys.executable,path=os.environ['PATH'],interval=.03,publishers={'operator':'fixture','rund-fixture':'fixture'}))
+        (self.repo/'host-id').write_text(socket.gethostname()+' fixture\n')
+        self.declaration=dict(kind='Service',id='demo',name='demo',publisher='operator',node='fixture',revision=1,version=1,
+                              desired='online',restart='always',argv=[sys.executable,'-c','import time;time.sleep(100)'])
+        self.path=self.repo/'objects/services/demo/declaration.json';write(self.path,self.declaration)
+        self.c=node_config(self.config)
+    def call(self,*args,check=True):
+        p=subprocess.run([sys.executable,'-B',str(SOURCE/'runctl'),'--config',str(self.config),*args],capture_output=True,text=True,timeout=20)
+        if check:self.assertEqual(p.returncode,0,p.stderr)
+        return json.loads(p.stdout) if check else p
     def until(self,fn):
-        end=time.monotonic()+10
+        end=time.monotonic()+8
         while time.monotonic()<end:
-            value=fn()
-            if value:return value
-            time.sleep(.03)
-        self.fail('condition timed out')
-
-    def test_rund_restart_has_normal_task_real_wait_and_frozen_history(self):
-        first=json.loads(self.call('status','rund').stdout)
-        self.call('stop','rund')
-        state=read(self.root/'tasks'/first['task']/'state.json')
-        self.assertEqual(state['phase'],'canceled');self.assertTrue(state['waitObserved'])
-        frozen=(self.root/'tasks'/first['task']/'state.json').read_bytes()
-        second=json.loads(self.call('start','rund').stdout)
-        self.assertNotEqual(first['task'],second['task'])
-        self.assertNotEqual(first['pid'],second['pid'])
-        self.assertEqual(frozen,(self.root/'tasks'/first['task']/'state.json').read_bytes())
-        declaration=read(self.root/'services/runtime-fixture/declaration.json')
-        self.assertEqual(declaration['kind'],'Service')
-        updated=dict(declaration,revision=declaration['revision']+1,version=2)
-        self.publish(updated)
-        self.until(lambda:json.loads(self.call('status','rund').stdout)['run_version']==2)
-        old=read(self.root/'tasks'/second['task']/'state.json')
-        self.assertTrue(old['waitObserved']);self.assertEqual(old['phase'],'canceled')
-
-    def test_foreground_run_and_duplicate_start_do_not_create_another_executor(self):
-        self.call('stop','rund')
-        foreground=subprocess.Popen([str(self.bin),'run','rund'],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            v=fn()
+            if v:return v
+            time.sleep(.05)
+        self.fail('timeout '+str(self.call('status')))
+    def tearDown(self):
+        self.call('stop',check=False);self.temp.cleanup()
+    def test_cold_start_no_installer_no_root_service_no_child_tasks(self):
+        sentinel=self.base/'shared/agents/business';sentinel.parent.mkdir(parents=True);sentinel.write_bytes(b'preserve')
+        self.call('start');self.until(lambda:self.call('status','demo')['actual']=='online')
+        first=self.call('status','demo');self.call('start');self.assertEqual(first['run'],self.call('status','demo')['run'])
+        self.assertFalse((self.base/'runtime').exists());self.assertFalse((self.base/'local/node.json').exists());self.assertFalse((self.base/'bin/runctl').exists())
+        self.assertEqual(sentinel.read_bytes(),b'preserve');self.assertFalse((self.base/'shared/tasks').exists())
+        self.assertNotIn('currentTask',get(self.c,'demo')[1]);self.assertEqual(self.call('status')['total'],1)
+        self.call('stop','demo');state=get(self.c,'demo')[1];self.assertTrue(state['waitObserved']);self.assertEqual(state['phase'],'stopped')
+        frozen=read(self.base/'local/services/demo/runs'/first['run']/'state.json')
+        self.call('start','demo');self.assertNotEqual(first['run'],self.call('status','demo')['run'])
+        self.assertEqual(frozen,read(self.base/'local/services/demo/runs'/first['run']/'state.json'))
+    def test_config_revision_restarts_direct_process_and_resets_intent(self):
+        self.call('start');self.until(lambda:self.call('status','demo')['actual']=='online');first=self.call('status','demo')
+        self.call('stop','demo');write(self.path,dict(self.declaration,revision=2,version=2,env={'EXAMPLE':'2'}))
+        self.until(lambda:self.call('status','demo')['actual']=='online')
+        self.assertEqual(self.call('status','demo')['run_version'],2);self.assertNotEqual(first['pid'],self.call('status','demo')['pid'])
+    def test_unknown_hostname_and_duplicate_mapping_fail(self):
+        with patch('socket.gethostname',return_value='missing'):
+            with self.assertRaisesRegex(ValueError,'hostname not registered'):node_config(self.config)
+        with (self.repo/'host-id').open('a') as f:f.write(socket.gethostname()+' other\n')
+        with self.assertRaisesRegex(ValueError,'duplicate hostname'):node_config(self.config)
+    def test_foreground_runtime_has_no_external_supervisor(self):
+        p=subprocess.Popen([sys.executable,'-B',str(SOURCE/'runctl'),'--config',str(self.config),'run'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
         try:
-            self.until(lambda:json.loads(self.call('status','rund').stdout)['actual']=='online')
-            initial=json.loads(self.call('status','rund').stdout)
-            repeated=json.loads(self.call('start','rund').stdout)
-            self.assertEqual(initial['task'],repeated['task'])
-            duplicate=self.call('run','rund',good=False)
-            self.assertNotEqual(duplicate.returncode,0)
-            foreground.terminate();self.assertEqual(foreground.wait(timeout=10),0)
-            state=read(self.root/'tasks'/initial['task']/'state.json')
-            self.assertEqual(state['phase'],'canceled');self.assertTrue(state['waitObserved'])
+            self.until(lambda:self.call('status')['rund']['actual']=='online');self.assertEqual(self.call('status')['rund']['pid'],p.pid)
+            self.until(lambda:self.call('status','demo')['actual']=='online');self.call('stop');self.assertEqual(p.wait(timeout=8),0)
         finally:
-            if foreground.poll() is None:
-                self.call('stop','rund');foreground.wait(timeout=10)
-            foreground.communicate()
-
-    def test_service_name_is_not_a_bootstrap_dispatch_rule(self):
-        declaration=read(self.root/'services/runtime-fixture/declaration.json')
-        self.publish(dict(declaration,name='host-runtime',revision=declaration['revision']+1))
-        self.publish(dict(kind='Service',id='application-rund',name='rund',node='fixture',publisher='operator',revision=1,version=1,desired='offline',restart='manual',task=dict(argv=[sys.executable,'-c','import time;time.sleep(60)'])))
-        row=json.loads(self.call('start','rund').stdout)
-        self.assertEqual(row['id'],'application-rund')
-        self.call('stop','rund')
-        self.assertEqual(json.loads(self.call('status','host-runtime').stdout)['actual'],'online')
-
-    def test_external_stop_waits_for_runtime_quiescence_before_signaling(self):
-        self.publish(dict(kind='Service',id='load',node='fixture',publisher='operator',revision=1,version=1,desired='offline',restart='manual',task=dict(argv=[sys.executable,'-c','import time;time.sleep(60)'])))
-        load=json.loads(self.call('start','load').stdout)
-        runtime=json.loads(self.call('status','rund').stdout)
-        self.call('desired','runtime-fixture','offline')
-        self.until(lambda:read(self.root/'tasks'/runtime['task']/'state.json')['phase']=='canceling')
-        self.assertFalse(read(self.root/'tasks'/runtime['task']/'state.json').get('cancelRequested',False))
-        self.assertEqual(json.loads(self.call('status','load').stdout)['pid'],load['pid'])
-        self.call('stop','load')
-        self.call('stop','rund')
-        state=read(self.root/'tasks'/runtime['task']/'state.json')
-        self.assertTrue(state['waitObserved'])
-
-class RoutedDesired(unittest.TestCase):
-    def test_default_configuration_uses_rund_root(self):
-        from unittest.mock import patch
-        from contextlib import redirect_stdout
-        import io
-        from runtime import cli
-        home=Path(tempfile.mkdtemp(prefix='runctl-default-')).resolve();prefix=home/'.rund'
-        c=dict(node='fixture',sharedRoot=str(prefix/'shared'),privateRoot=str(prefix/'local'),python=sys.executable,home=str(home),path=os.environ['PATH'],publishers={'rund-fixture':'fixture'})
-        install(prefix,c,Path(__file__).resolve().parents[1],'a'*40)
-        write(home/'.agentd/local/node.json',{'must':'remain historical'})
-        output=io.StringIO()
-        with patch.object(cli.Path,'home',return_value=home),redirect_stdout(output):
-            self.assertEqual(cli.main(['status']),0)
-        self.assertEqual(json.loads(output.getvalue())['node'],'fixture')
-        self.assertEqual(read(home/'.agentd/local/node.json'),{'must':'remain historical'})
-
-    def test_remote_desired_uses_rund_entry(self):
-        from unittest.mock import patch
-        from runtime import cli
-        document=dict(id='demo',publisher='operator',desired='offline')
-        config=dict(node='target',sharedRoot='fixture',publishers={'operator':'origin'})
-        with patch.object(cli,'get',return_value=(document,None)),patch.object(cli.subprocess,'run',return_value=subprocess.CompletedProcess([],0,json.dumps(document),'')) as run:
-            self.assertEqual(cli.set_desired(config,'demo','offline'),document)
-        self.assertEqual(run.call_args.args[0][-1],'exec "$HOME/.rund/bin/runctl" desired demo offline')
-
-    def test_origin_transports_intent_without_a_running_sync_service(self):
-        from unittest.mock import patch
-        from runtime import cli
-        old=dict(id='example',publisher='operator',desired='online')
-        new=dict(old,desired='offline')
-        config=dict(node='origin',sharedRoot='fixture',publishers={'operator':'origin'})
-        with patch.object(cli,'get',return_value=(old,None)),patch.object(cli,'desired',return_value=new),patch.object(cli,'refresh') as refresh:
-            self.assertEqual(cli.set_desired(config,'example','offline'),new)
-        refresh.assert_called_once_with(config)
-
-    def test_stale_offline_replica_cannot_complete_start(self):
-        from unittest.mock import patch
-        from runtime import cli
-        old=dict(kind='Service',id='demo',name='demo',node='target',publisher='operator',revision=1,desired='offline',version=1)
-        new=dict(old,revision=2,desired='online')
-        rows=[{'services':[dict(id='demo',actual='offline',desired='offline',state='ok')]},
-              {'services':[dict(id='demo',actual='online',desired='online',state='ok')]}]
-        with patch.object(cli,'objects',return_value={'demo':(None,old)}), \
-             patch.object(cli,'set_desired',return_value=new), \
-             patch.object(cli,'refresh'),patch.object(cli.time,'sleep'), \
-             patch.object(cli,'status',side_effect=rows) as status, \
-             patch.object(cli,'get',side_effect=[(old,{'currentTask':None}),(new,{'currentTask':None})]):
-            result=cli.service({'node':'target','sharedRoot':'fixture'},'demo','start')
-        self.assertEqual(status.call_count,2)
-        self.assertEqual(result['actual'],'online')
+            if p.poll() is None:p.kill();p.wait()
+            p.stderr.close()
+    def test_default_configuration_is_checkout(self):
+        with patch('runtime.cli.Path.home',return_value=self.base),patch('runtime.cli.node_config',side_effect=ValueError('fixture')) as load:
+            self.assertEqual(main(['status']),2)
+        self.assertEqual(load.call_args.args[0],self.base/'.rund/config/rund.json')
 
 if __name__=='__main__':unittest.main()
