@@ -116,7 +116,31 @@ Task 的常见路径为 `accepted → preparing → queued → starting → runn
 
 ## Bootstrap
 
-调用方先提供固定 runtime 源码目录和同步工具、节点配置、同步配置、私有凭据引用及普通同步 Service 声明。tools/bootstrap.py 接收 --prefix、--node-config、--runtime-source、--revision，可用 --upgrade 允许已有安装根。它写 prefix/local/node.json（runtimeSource 指向传入目录）、创建共享根及私有 artifacts/locks/tasks、生成 bin/runctl。revision 参数校验为固定 40 位小写 SHA；安装器不导出、复制或校验源码目录与该 SHA 的对应关系，固定源码由调用方保证。安装器也不生成同步配置和 Service 声明。
+新节点的常规入口为 `python -B tools/bootstrap.py --deployment <配置 checkout> [--node <id>]`。第三步包含固定源码导出、底座安装、原发布者声明提交、首次同步、普通 rund Service 启动和本节点全部声明服务的收敛检查。`--check` 校验输入而不安装或启停；`--timeout` 控制启动后的收敛等待秒数，默认 300。hostname 不在配置映射中时要求显式选择节点。
+
+配置 checkout 根的 bootstrap.json 格式为：
+
+```json
+{
+  "format": "rund-bootstrap/v1",
+  "runtime": "runtime-code",
+  "objects": "objects",
+  "sources": [
+    {"alias": "runtime-code", "repository": "ssh://source.example/project/runtime.git", "revision": "0123456789012345678901234567890123456789", "requires": []},
+    {"alias": "transport", "repository": "ssh://source.example/project/transport.git", "revision": "1234567890123456789012345678901234567890", "requires": []}
+  ],
+  "hosts": {"host.example": "node-a"},
+  "nodes": {"node-a": {"config": "nodes/node-a.json", "sync": "nodes/node-a.sync.json", "requiredFiles": ["/home/user/.ssh/config"]}}
+}
+```
+
+hosts 可内嵌 hostname 到 node 的对象，或引用相对 checkout 根的文本映射文件；文本每行 hostname node，支持空行与 # 注释。配置路径相对 checkout 根且不能越界。sources 使用普通固定 Git 源码计划合同；runtime 指定 rund 源码 alias，所有底座源导出至 prefix/runtime/<revision>。机制 checkout 可提供对应固定 Git 对象，运行时不从可变 checkout 启动。节点 privateRoot 为 prefix/local；runtimeSource 必须匹配所选固定 revision，syncConfig 为 prefix/local/sync.json，运输配置的 nodeConfig 指向 prefix/local/node.json。
+
+objects 保存普通 Service/Task 声明和 configs/<摘要>.json，不包含运行状态。bootstrap 按 publisher 映射提交本节点声明：本机原发布者直接调用协议，远端原发布者经 SSH 使用其已安装协议；先由原节点同步，再由目标节点同步。远端原发布节点须已安装；新集群先启动声明原发布节点。配置附件摘要必须匹配，声明保留输入 revision 和 desired，过期或冲突由正常协议拒绝。bootstrap 不通过写入外国原件规避发布者权威。
+
+重复执行同一配置保持既有 rund Task；已安装底座配置或运输配置不同则要求显式升级。源导出与中间产物保留以供重试。只有本节点非空 Service 集合包含 bootstrapService，且所有声明服务版本、desired 和健康符合预期、drift=0、诊断为空时返回成功。离线声明同样参加核验。机器须已具备 Python、Git、SSH、运输所需系统工具与权限，以及配置引用的私有凭据；业务依赖由其普通准备 Task 或部署前提提供。
+
+低层安装入口仍为 tools/bootstrap.py --prefix <目录> --node-config <文件> --runtime-source <固定目录> --revision <SHA>，--upgrade 允许已有安装根。该接口只写 prefix/local/node.json、共享/私有目录及 bin/runctl；不导出源码、不生成运输配置或发布声明。它仅校验 revision 为 40 位小写 SHA，固定源码与 SHA 的对应由调用方保证。已有运行节点升级须先经声明收口负载。
 
 node.json 的 bootstrapService 引用一个普通 Service id。runctl start <该 Service> 在必要同步后启动外部 bootstrap；bootstrap 与节点 rund 使用同一套 Service/Task 执行状态机，分别只处理该 Service 及其子 Task、其余本机对象。名称不参与执行分派，现场显示名为 rund。同步 Service 直接执行预先提供的固定工具，无业务源码依赖。后续发布准备 Task 与业务 Service；准备工具获取固定源码并发布本地产物，业务 Task 仅等待 needs 文件。工具、端点、发布者映射及密钥位置由调用方提供。
 

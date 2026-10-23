@@ -10,4 +10,6 @@ runtime/admission.py 供各节点只读检查 grant；runtime/scheduling.py 与 
 
 tools/prepare.py、tools/env_exec.py、tools/sync.py 和 tools/external_exec.py 是普通 Task 的负载，分别完成固定源码准备、内存凭据注入、单写者运输和官方管理器适配。rund 不获取源码或解密凭据。源码准备只接受固定 sources 计划，直接校验 Git 对象并原子发布一份 artifact；源码缓存仅保存 Git 对象、Git 私有配置与锁。
 
+新机器 checkout 本机制仓和调用方配置仓后，执行 `python -B tools/bootstrap.py --deployment <配置仓目录>`。配置仓的 bootstrap.json 选择节点、固定源码与声明；命令导出固定底座、安装入口、向原发布者提交声明并同步、执行普通 rund Service 的 start，等待本节点声明服务健康。`--node <id>` 显式选择节点，`--check` 只校验；配置格式与低层安装接口见 [PROTOCOL.md](PROTOCOL.md#bootstrap)。本仓不带真实部署计划或凭据。
+
 机制测试使用 Python 标准库 unittest，入口 `python -B -m unittest discover -s tests -v`。测试创建自己的进程、仓与目录；真实五机安装及服务验证由调用方完成。历史变更由 Git 保存。

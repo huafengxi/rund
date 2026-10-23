@@ -20,6 +20,27 @@ def install(prefix,config,source,revision,upgrade=False):
     script='#!'+c['python']+'\nimport json,sys\nsys.dont_write_bytecode=True\nfrom pathlib import Path\nconfig=Path(__file__).resolve().parents[1]/"local/node.json"\nc=json.loads(config.read_text());sys.path.insert(0,c["runtimeSource"])\nfrom runtime.cli import main\nraise SystemExit(main(default_config=config))\n'
     entry=directory(prefix/'bin')/'runctl';entry.write_text(script);entry.chmod(0o700)
 
-if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--prefix',required=True,type=Path);p.add_argument('--node-config',required=True,type=Path);p.add_argument('--runtime-source',required=True,type=Path);p.add_argument('--revision',required=True);p.add_argument('--upgrade',action='store_true');a=p.parse_args()
-    install(a.prefix,json.loads(a.node_config.read_text()),a.runtime_source,a.revision,a.upgrade)
+def main(argv=None):
+    p=argparse.ArgumentParser(description='Bootstrap a configured node from two Git checkouts.')
+    p.add_argument('--deployment',type=Path,help='configuration checkout containing bootstrap.json')
+    p.add_argument('--node',help='node id; default is the configured hostname mapping')
+    p.add_argument('--check',action='store_true',help='validate deployment inputs without installing or starting')
+    p.add_argument('--timeout',type=float,default=300)
+    p.add_argument('--prefix',type=Path);p.add_argument('--node-config',type=Path)
+    p.add_argument('--runtime-source',type=Path);p.add_argument('--revision');p.add_argument('--upgrade',action='store_true')
+    a=p.parse_args(argv)
+    try:
+        if a.deployment:
+            require(not any((a.prefix,a.node_config,a.runtime_source,a.revision,a.upgrade)),'deployment and low-level install arguments are exclusive')
+            require(a.timeout>0,'positive convergence timeout required')
+            from tools.deployment import bootstrap
+            print(json.dumps(bootstrap(a.deployment,a.node,check=a.check,timeout=a.timeout)))
+        else:
+            require(all((a.prefix,a.node_config,a.runtime_source,a.revision)),'deployment checkout or all low-level installation arguments required')
+            require(not a.node and not a.check,'node/check require a deployment checkout')
+            install(a.prefix,json.loads(a.node_config.read_text()),a.runtime_source,a.revision,a.upgrade)
+        return 0
+    except (OSError,ValueError,KeyError,TypeError,__import__('subprocess').SubprocessError) as e:
+        print('bootstrap: '+str(e),file=sys.stderr);return 2
+
+if __name__=='__main__':sys.exit(main())
