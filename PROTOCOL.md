@@ -138,6 +138,8 @@ runctl status [name/id] 查询；start/stop <Service> 修改原发布者 desired
 
 start/stop 超时表示意图已发布而执行仍待完成，不能据此认定声明回滚。跨节点启停应在目标节点运行 CLI；原发布者路由使用 publishers 中的节点名作为 SSH 目标。status 不主动同步，其副本新鲜度由同步链路决定。
 
+原发布节点写入期望状态后主动同步一次，目标节点再同步并等待执行；两侧 CLI 运输都不依赖 rund 或 shared-sync 常驻进程在线。bootstrap 停启期间同样通过这条路径送达意图。
+
 停止 bootstrapService 所引用的 rund 前，CLI 检查其余本机 Task 已终结。rund 观察自身停用、版本替换或子 Task 取消意图后暂停新执行；负载收口时在私有诊断写入与当前 Service 声明摘要绑定的 quiescentFor。外部 bootstrap 核对进程身份和该确认后才发送取消信号，取得真实 wait 后冻结 rund Task 终态并退出。前台 bootstrap 收到 TERM/INT 时同样经声明停止并等待收口。
 
 start 是设置 online 的幂等操作，不承诺创建新一代；需要显式重启时顺序执行 stop、start。Service 子 Task 的 resources 在模板中指定，遵循与独立 Task 相同的放行语义。

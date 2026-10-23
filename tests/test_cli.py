@@ -107,6 +107,16 @@ class CLI(unittest.TestCase):
         self.assertTrue(state['waitObserved'])
 
 class RoutedDesired(unittest.TestCase):
+    def test_origin_transports_intent_without_a_running_sync_service(self):
+        from unittest.mock import patch
+        from runtime import cli
+        old=dict(id='example',publisher='operator',desired='online')
+        new=dict(old,desired='offline')
+        config=dict(node='origin',sharedRoot='fixture',publishers={'operator':'origin'})
+        with patch.object(cli,'get',return_value=(old,None)),patch.object(cli,'desired',return_value=new),patch.object(cli,'refresh') as refresh:
+            self.assertEqual(cli.set_desired(config,'example','offline'),new)
+        refresh.assert_called_once_with(config)
+
     def test_stale_offline_replica_cannot_complete_start(self):
         from unittest.mock import patch
         from runtime import cli

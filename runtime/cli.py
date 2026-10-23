@@ -87,10 +87,13 @@ def refresh(c):
 
 def set_desired(c,identifier,value,mode=None):
     d,_=get(c['sharedRoot'],identifier);origin=c['publishers'][d['publisher']]
-    if origin==c['node']:return desired(c['sharedRoot'],identifier,value,writer=c['node'],publishers=c['publishers'],mode=mode)
+    if origin==c['node']:
+        document=desired(c['sharedRoot'],identifier,value,writer=c['node'],publishers=c['publishers'],mode=mode)
+        refresh(c)
+        return document
     import shlex
     argv=['desired',identifier,value]+(['--mode',mode] if mode else [])
-    result=subprocess.run(['ssh','-o','BatchMode=yes',origin,'exec "$HOME/.agentd/bin/runctl" '+shlex.join(argv)],capture_output=True,text=True,timeout=45)
+    result=subprocess.run(['ssh','-o','BatchMode=yes',origin,'exec "$HOME/.agentd/bin/runctl" '+shlex.join(argv)],capture_output=True,text=True,timeout=130)
     require(result.returncode==0,'publisher unavailable: '+result.stderr[-1000:])
     return json.loads(result.stdout)
 
