@@ -1,4 +1,4 @@
-"""Read-only grant checks used by every node execution Owner."""
+"""Read-only grant checks used by every node execution executor."""
 from pathlib import Path
 from .store import digest, read
 

@@ -1,4 +1,4 @@
-"""Ordinary scheduler Service; no process execution or node Owner coupling."""
+"""Ordinary scheduler Service; no process execution or node executor coupling."""
 import os
 import signal
 import time

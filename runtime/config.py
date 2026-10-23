@@ -78,7 +78,9 @@ def node_config(path):
     name(c['node'])
     for k in ('sharedRoot','privateRoot','python','home'):require(Path(c[k]).is_absolute(),'absolute '+k+' required')
     a,b=Path(c['sharedRoot']),Path(c['privateRoot']);require(a!=b and a not in b.parents and b not in a.parents,'shared/private roots overlap')
-    require(c['publishers'].get('owner-'+c['node'])==c['node'],'node owner publisher required')
+    require(c['publishers'].get('rund-'+c['node'])==c['node'],'node rund publisher required')
+    if 'bootstrapService' in c:
+        name(c['bootstrapService']);require(c['publishers'].get('bootstrap-'+c['node'])==c['node'],'node bootstrap publisher required')
     require('scheduler' not in c,'scheduler policy belongs to a Service configuration')
     if 'admission' in c:
         a=c['admission'];require(isinstance(a,dict) and set(a)=={'publisher'},'admission publisher required');name(a['publisher'])

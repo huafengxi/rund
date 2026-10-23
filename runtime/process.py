@@ -1,4 +1,4 @@
-"""Native foreground process execution. All Popen handles stay in one Owner."""
+"""Native foreground process execution. All Popen handles stay in one executor."""
 import os
 import signal
 import subprocess
@@ -45,7 +45,7 @@ class Processes:
                 rc=handle.poll()
                 if rc is None:return dict(status='unknown',reason='owned wait unavailable',rc=None,waitObserved=False)
                 return dict(status='exited',rc=rc,waitObserved=True)
-            return dict(status='unknown',reason='prior Owner wait unavailable',rc=None,waitObserved=False)
+            return dict(status='unknown',reason='prior executor wait unavailable',rc=None,waitObserved=False)
         except (OSError,ValueError,RuntimeError) as e:return dict(status='unknown',reason=str(e),rc=rc,waitObserved=rc is not None)
     def signal(self,p,kill=False):
         require(p and p['boot']==boot_id(),'unknown process boot identity')

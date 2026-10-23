@@ -1,4 +1,4 @@
-"""Lightweight object client. Never imports Owner or process execution."""
+"""Lightweight object client. Never imports executor or process execution."""
 from pathlib import Path
 from .config import discover,publish,validate,FINAL
 from .store import read,write,digest,require,canonical

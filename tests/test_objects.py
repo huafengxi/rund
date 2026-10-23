@@ -11,7 +11,7 @@ import time
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from runtime.config import publish,changed
-from runtime.owner import Owner
+from runtime.engine import Engine
 from runtime.process import identity,same,alive
 from runtime.store import read,write
 from runtime.protocol import get,desired
@@ -19,8 +19,8 @@ from runtime.protocol import get,desired
 class Objects(unittest.TestCase):
     def setUp(self):
         self.base=Path(tempfile.mkdtemp(prefix='rund-objects-'))
-        self.c=dict(node='a',sharedRoot=str(self.base/'shared'),privateRoot=str(self.base/'private'),python=sys.executable,home=str(self.base),path=os.environ['PATH'],publishers={'operator':'a','owner-a':'a','owner-b':'b'},version=1)
-        self.o=Owner(self.c)
+        self.c=dict(node='a',sharedRoot=str(self.base/'shared'),privateRoot=str(self.base/'private'),python=sys.executable,home=str(self.base),path=os.environ['PATH'],publishers={'operator':'a','rund-a':'a','rund-b':'b'},version=1)
+        self.o=Engine(self.c)
     def tearDown(self):
         for p in self.o.processes.handles.values():
             if p.poll() is None:
@@ -77,9 +77,9 @@ class Objects(unittest.TestCase):
         self.put(self.task(),self.base/'shared/anything/else/declaration.json');self.until(lambda:self.state('task') and self.state('task')['phase']=='succeeded')
     def test_duplicate_identity_blocks(self):
         d=self.task();self.put(d);write(self.base/'shared/elsewhere/declaration.json',d);self.o.round();self.assertTrue(self.o.errors)
-    def test_second_owner_refused(self):
-        with self.assertRaises(BlockingIOError):Owner(self.c)
-    def test_unknown_owner_restart_does_not_spawn(self):
+    def test_second_executor_refused(self):
+        with self.assertRaises(BlockingIOError):Engine(self.c)
+    def test_unknown_executor_restart_does_not_spawn(self):
         p=self.put(self.task());s=self.o.initial(self.task());s.update(phase='starting',updatedAt='2020-01-01T00:00:00+00:00');write(p.with_name('state.json'),s)
         self.o.round();self.assertEqual(self.state('task')['phase'],'unknown');self.assertFalse(self.o.processes.handles)
     def test_shared_business_files_are_not_execution_objects(self):

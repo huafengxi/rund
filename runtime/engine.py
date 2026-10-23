@@ -1,4 +1,4 @@
-"""One node Owner: file dependencies, Task execution and Service supervision."""
+"""Scoped execution engine: file dependencies, Task execution and Service supervision."""
 import copy
 import os
 from pathlib import Path
@@ -10,15 +10,16 @@ from .process import Processes,expand
 from .store import digest,directory,lock,now,read,require,write
 from .admission import admitted
 
-class Owner:
-    def __init__(self,c):
+class Engine:
+    def __init__(self,c,external=False):
         self.c=c;self.root=directory(c['sharedRoot']);self.private=directory(c['privateRoot']);self.stopped=False
-        self.fd=lock(self.private/'locks/owner.lock');self.processes=Processes(c)
-        self.accepted_path=self.private/'accepted.json';self.accepted=read(self.accepted_path) if self.accepted_path.exists() else {}
+        self.external=external;self.label='bootstrap' if external else 'runtime';self.paused=False;self.generation=None
+        self.fd=lock(self.private/('locks/'+self.label+'.lock'));self.processes=Processes(c)
+        self.accepted_path=self.private/('bootstrap-accepted.json' if external else 'accepted.json');self.accepted=read(self.accepted_path) if self.accepted_path.exists() else {}
         self.objects={};self.errors=[]
         for k in ('artifacts','tasks'):directory(self.private/k)
         from .native import identity
-        self.identity=identity(os.getpid());write(self.private/'owner.json',dict(self.identity,startedAt=now(),diagnostics=[]))
+        self.identity=identity(os.getpid());write(self.private/(self.label+'.json'),dict(self.identity,startedAt=now(),diagnostics=[],quiescentFor=None))
     def close(self):os.close(self.fd)
     def state(self,path):
         p=path.with_name('state.json');return read(p) if p.exists() else None
@@ -35,14 +36,14 @@ class Owner:
     def accept(self):
         found,errors=discover(self.root);self.errors=errors
         for tid,(p,d) in found.items():
-            if d['node']!=self.c['node']:continue
+            if not self.managed(d):continue
             try:
                 require(d['publisher'] in self.c['publishers'],'unknown publisher')
                 if tid in self.accepted:changed(self.accepted[tid]['declaration'],d)
                 self.accepted[tid]=dict(path=str(p.relative_to(self.root)),declaration=d)
             except (OSError,ValueError,KeyError,TypeError) as e:self.errors.append(tid+': '+str(e))
         write(self.accepted_path,self.accepted)
-        self.objects={tid:(self.root/v['path'],v['declaration']) for tid,v in self.accepted.items()}
+        self.objects={tid:(self.root/v['path'],v['declaration']) for tid,v in self.accepted.items() if self.managed(v['declaration'])}
     def cancel(self,tid):
         p,d=self.objects[tid]
         require(self.c['publishers'][d['publisher']]==self.c['node'],'cancellation must be written by declaration publisher')
@@ -59,6 +60,7 @@ class Owner:
             if not ps or ps['currentTask']!=d['id']:return
         if s['phase'] in ('accepted','preparing','queued'):
             if d['desired']=='cancel':self.save(p,s,phase='canceled',finishedAt=now(),reason='canceled before spawn');return
+            if self.paused:return
             missing=[f for f in d.get('needs',[]) if not Path(expand(f,self.c,d['id'])).is_file()]
             if missing:self.save(p,s,phase='preparing',reason='missing files: '+', '.join(missing));return
             if 'resources' in d:
@@ -80,6 +82,8 @@ class Owner:
         if fact['status']=='unknown':
             self.save(p,s,phase='unknown',reason=fact.get('reason'));return
         if d['desired']=='cancel':
+            if self.external and not self.quiescent(d,s):
+                self.save(p,s,phase='canceling',reason='awaiting rund workload closure');return
             step=s.get('stopStep',0);kill=d.get('cancelMode')=='kill' or step==1 and time.time()>=s.get('stopDeadline',0)
             if step==0 or step==1 and kill:
                 try:
@@ -108,15 +112,17 @@ class Owner:
             if time.time()<s['nextStartAt']:return
             should_start=True
         if current and ts is None:return
+        if self.paused:return
         # Recover an interrupted publication before creating another child. A child
         # never spawns until the Service's currentTask points to it.
         orphan=next((t for _,t in self.objects.values() if t['kind']=='Task' and t.get('service',{}).get('id')==d['id'] and t['service']['declarationDigest']==digest(d) and self.state(self.objects[t['id']][0]) is None),None)
-        task=orphan or dict(copy.deepcopy(d['task']),kind='Task',id='t-'+uuid.uuid4().hex,publisher='owner-'+self.c['node'],node=self.c['node'],revision=1,desired='run',service=dict(id=d['id'],version=d['version'],declarationDigest=digest(d)))
+        task=orphan or dict(copy.deepcopy(d['task']),kind='Task',id='t-'+uuid.uuid4().hex,publisher=('bootstrap-' if self.external else 'rund-')+self.c['node'],node=self.c['node'],revision=1,desired='run',service=dict(id=d['id'],version=d['version'],declarationDigest=digest(d)))
         tp=publish(self.root,task,writer=self.c['node'],publishers=self.c['publishers'])
         self.objects[task['id']]=(tp,task)
         self.save(p,s,declarationDigest=digest(d),phase='starting',currentTask=task['id'],nextStartAt=None,reason=None)
     def round(self):
         self.accept()
+        self.control()
         for p,d in list(self.objects.values()):
             try:
                 if d['kind']=='Service':self.service(p,d)
@@ -125,8 +131,47 @@ class Owner:
             try:
                 if d['kind']=='Task':self.task(p,d)
             except (OSError,ValueError,KeyError,TypeError,RuntimeError) as e:self.errors.append(d['id']+': '+str(e))
-        record=read(self.private/'owner.json');record.update(node=self.c['node'],observedAt=now(),diagnostics=self.errors);write(self.private/'owner.json',record)
+        record=read(self.private/(self.label+'.json'));record.update(node=self.c['node'],observedAt=now(),diagnostics=self.errors,quiescentFor=self.quiescent_digest());write(self.private/(self.label+'.json'),record)
+    def managed(self,d):
+        if d['node']!=self.c['node']:return False
+        root=self.c.get('bootstrapService')
+        belongs=d['id']==root or d.get('service',{}).get('id')==root if root else False
+        return belongs if self.external else not belongs
+    def control(self):
+        if self.external or not self.c.get('bootstrapService'):return
+        found,errors=discover(self.root);entry=found.get(self.c['bootstrapService'])
+        if not entry:self.paused=True;return
+        p,d=entry;s=self.state(p);task=found.get((s or {}).get('currentTask'))
+        if self.generation is None and task:
+            ts=self.state(task[0])
+            if ts and ts.get('process',{} ) and ts['process']['pid']==os.getpid():self.generation=task[1]['service']['version']
+        self.paused=d['desired']!='online' or self.generation is None or self.generation!=d['version'] or bool(task and task[1]['desired']=='cancel')
+    def quiescent_digest(self):
+        if self.external or not self.paused:return None
+        for p,d in self.objects.values():
+            s=self.state(p)
+            if d['kind']=='Task' and s and s['phase'] not in FINAL and s['phase'] not in ('accepted','preparing','queued'):return None
+        found,_=discover(self.root);entry=found.get(self.c.get('bootstrapService'))
+        return digest(entry[1]) if entry else None
+    def quiescent(self,d,s):
+        p=self.private/'runtime.json'
+        if not p.exists():return False
+        health=read(p);parent=self.objects.get(d['service']['id'])
+        from .process import same
+        return bool(parent and same(health,s['process']) and health.get('quiescentFor')==digest(parent[1]))
     def run(self):
         def stop(*unused):self.stopped=True
         for sig in (signal.SIGTERM,signal.SIGINT):signal.signal(sig,stop)
-        while not self.stopped:self.round();time.sleep(self.c.get('interval',.2))
+        while True:
+            if self.external and self.stopped:
+                from .cli import set_desired
+                set_desired(self.c,self.c['bootstrapService'],'offline')
+                self.stopped=False
+            self.round()
+            if self.external:
+                entry=self.objects.get(self.c['bootstrapService']);state=self.state(entry[0]) if entry else None
+                if entry and entry[1]['desired']=='offline' and state and state['phase']=='stopped':return
+            elif self.stopped:
+                # The external supervisor sends TERM only after a quiescent acknowledgement.
+                if not self.c.get('bootstrapService') or self.quiescent_digest() is not None:return
+            time.sleep(self.c.get('interval',.2))
