@@ -112,7 +112,7 @@ status 的 actual、run_version、state、drift 为派生健康视图，检查�
 | start / stop <Service name/id> | 保存本机 Service 启停意图，等待约 120 秒内收敛 |
 | cancel <Task id> [--mode terminate\|kill] | 本地追加取消版本，不等待终态 |
 | publish --input <file\|-> | 发布完整声明，自动分配下一个数字版本，相同内容幂等 |
-| desired <id> <value> [--mode terminate\|kill] | Task 追加意图版本；Service 保存本机启停意图 |
+| desired <id> <value> [--mode terminate\|kill] | Task 追加意图版本；Service 到执行节点保存本机启停意图 |
 | sync | 按约定执行一次共享树同步 |
 
 客户端不直接 spawn/kill 受管负载或回写执行状态。节点停止前已有 Task 须先执行完或取消。服务操作超时表示意图已记录；status 不主动同步。

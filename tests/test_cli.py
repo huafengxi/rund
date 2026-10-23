@@ -78,6 +78,17 @@ class CLI(unittest.TestCase):
         self.assertFalse(state['waitObserved']);self.assertIsNone(state['process'])
         self.call('stop');self.call('start');self.assertEqual(state,get(self.c,'static-task')[1])
         source.unlink();self.assertEqual(state,get(self.c,'static-task')[1])
+    def test_remote_service_intent_routes_by_execution_node(self):
+        from runtime.cli import set_desired
+        d=dict(self.declaration,node='other')
+        response=subprocess.CompletedProcess([],0,stdout=json.dumps(dict(d,desired='offline')),stderr='')
+        with patch('runtime.cli.services.get',return_value=(d,None)),patch('runtime.cli.subprocess.run',return_value=response) as run:
+            result=set_desired(self.c,'demo','offline')
+        self.assertEqual(result['desired'],'offline')
+        argv=run.call_args.args[0]
+        self.assertEqual(argv[3],'other')
+        self.assertIn('desired demo offline',argv[-1])
+
     def test_default_configuration_is_checkout(self):
         with patch('runtime.cli.Path.home',return_value=self.base),patch('runtime.cli.node_config',side_effect=ValueError('fixture')) as load:
             self.assertEqual(main(['status']),2)

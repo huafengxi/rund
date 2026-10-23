@@ -94,7 +94,14 @@ def select(c,selector):
 
 def set_desired(c,identifier,value,mode=None):
     d,_=services.get(c,identifier)
-    if d['kind']=='Service':return services.set_intent(c,d,value)
+    if d['kind']=='Service':
+        if d['node']==c['node']:return services.set_intent(c,d,value)
+        import shlex
+        argv=['desired',identifier,value]
+        result=subprocess.run(['ssh','-o','BatchMode=yes',d['node'],
+            'exec "$HOME/.rund/rund/runctl" '+shlex.join(argv)],capture_output=True,text=True,timeout=130)
+        require(result.returncode==0,'execution node unavailable: '+result.stderr[-1000:])
+        return json.loads(result.stdout)
     from .protocol import objects as shared_objects
     if identifier not in shared_objects(c['sharedRoot']):
         p,_=services.objects(c)[identifier]
