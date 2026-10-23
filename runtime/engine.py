@@ -46,6 +46,8 @@ class Engine:
             if d['node']!=self.c['node']:continue
             try:
                 require(d['publisher'] in self.c['publishers'],'unknown publisher')
+                if d['kind']=='Task' and not p.exists():
+                    publish(self.root,d,writer=self.c['node'],publishers=self.c['publishers'])
                 if tid in self.accepted:changed(self.accepted[tid]['declaration'],d)
                 self.accepted[tid]=dict(path=str(p.relative_to(self.root)),declaration=d)
             except (OSError,ValueError,KeyError,TypeError) as e:self.errors.append(tid+': '+str(e))

@@ -29,13 +29,14 @@ def reconcile(c, policy):
             return
         p, d = entry
         s = read(p.with_name('state.json')) if p.with_name('state.json').exists() else None
-        if s and (s['phase'] in FINAL or d['kind']=='Service' and s['phase'] in ('stopped','backoff','preparing')):
+        if s and (s['phase'] in FINAL or d['kind']=='Service' and (s['phase'] in ('stopped','backoff','preparing') or
+                s['phase']=='queued' and s.get('waitObserved') and grants[tid]!=execution_digest(d))):
             del grants[tid]
         else:
             held.update(d.get('resources', []))
     queue = []
     for tid, (p, d) in found.items():
-        if 'resources' not in d or tid in grants or d['desired'] != ('run' if d['kind']=='Task' else 'online'):
+        if 'resources' not in d or tid in grants or d['kind']=='Task' and d['desired']!='run':
             continue
         sp = p.with_name('state.json')
         s = read(sp) if sp.exists() else None

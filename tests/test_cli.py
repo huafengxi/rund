@@ -69,6 +69,16 @@ class CLI(unittest.TestCase):
         finally:
             if p.poll() is None:p.kill();p.wait()
             p.stderr.close()
+    def test_static_task_cancellation_uses_protocol_and_freezes(self):
+        d=dict(kind='Task',id='static-task',publisher='operator',node='fixture',revision=1,desired='run',
+               argv=[sys.executable,'-c','raise SystemExit(99)'],needs=[str(self.base/'missing')])
+        source=self.repo/'objects/tasks/static-task/declaration.json';write(source,d);before=source.read_bytes()
+        self.call('start');self.until(lambda:(get(self.c,'static-task')[1] or {}).get('phase')=='preparing')
+        self.call('cancel','static-task');self.until(lambda:get(self.c,'static-task')[1]['phase']=='canceled')
+        self.assertEqual(before,source.read_bytes());state=get(self.c,'static-task')[1]
+        self.assertFalse(state['waitObserved']);self.assertIsNone(state['process'])
+        self.call('stop');self.call('start');self.assertEqual(state,get(self.c,'static-task')[1])
+        source.unlink();self.assertEqual(state,get(self.c,'static-task')[1])
     def test_default_configuration_is_checkout(self):
         with patch('runtime.cli.Path.home',return_value=self.base),patch('runtime.cli.node_config',side_effect=ValueError('fixture')) as load:
             self.assertEqual(main(['status']),2)

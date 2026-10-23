@@ -6,7 +6,7 @@ rund 是直接运行的节点底座。Service 表达持续运行意图并直接�
 
 机制源码直接运行 Git checkout。配置仓的 rund.json 为共用配置，host-id 将系统 hostname 映射到稳定节点 ID；objects/services/<id>/declaration.json 保存 Service，objects/tasks/<id>/declaration.json 可保存静态 Task，objects/configs/ 保存附件。每个 rund 只执行 node 等于本节点的对象。
 
-动态 Task 的 declaration.json 位于 shared/tasks/<id>/，由 publisher 映射的原发布节点单写。两类对象的 state.json 均由目标节点单写，分别位于 shared/services/<id>/ 和 shared/tasks/<id>/。配置仓声明直接读取，不经过共享树发布；共享树中的 Service 声明仅供历史查询，不参与执行。配置仓与共享协议出现同 ID Task 时正文必须一致。
+动态 Task 的 declaration.json 位于 shared/tasks/<id>/，由 publisher 映射的原发布节点单写。两类对象的 state.json 均由目标节点单写，分别位于 shared/services/<id>/ 和 shared/tasks/<id>/。Service 声明直接读取；静态 Task 由目标节点以自身发布者身份保存共享声明快照后执行，供配置移除后查询历史；共享树中的 Service 声明仅供历史查询，不参与执行。配置仓与共享协议出现同 ID Task 时正文必须一致。
 
 id 全局唯一；声明修改须提高 revision；相同 revision 的内容必须一致。Task 终态整份 state.json 冻结。同步依据原写者与 replica 属组传输，副本不能取得写权。shared 与 local 不相交；密钥、进程锁、日志、源码缓存、工作目录和应用私有数据保存在 local。
 

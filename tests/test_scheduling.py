@@ -130,4 +130,16 @@ class Scheduling(unittest.TestCase):
         self.assertTrue(state(0,'svc-a')['waitObserved'])
         self.assertFalse(any(d['kind']=='Task' for _,d in self.engines[0].objects.values()))
 
+    def test_offline_service_can_start_and_replace_its_resource_version(self):
+        from runtime.services import publish as put_service,get as get_service,set_intent
+        c=self.engines[0].c
+        d=dict(kind='Service',id='resource-service',publisher='operator',node='a',revision=1,version=1,desired='offline',restart='manual',
+               resources=['repo'],argv=[sys.executable,'-c','import time;time.sleep(100)'])
+        put_service(c,d);set_intent(c,d,'online')
+        self.until(lambda:(get_service(c,d['id'])[1] or {}).get('phase')=='running')
+        first=get_service(c,d['id'])[1]['runId']
+        updated=dict(d,version=2,revision=2,desired='online',env={'VERSION':'2'});put_service(c,updated)
+        self.until(lambda:(get_service(c,d['id'])[1] or {}).get('runVersion')==2 and get_service(c,d['id'])[1]['phase']=='running')
+        self.assertNotEqual(first,get_service(c,d['id'])[1]['runId'])
+
 if __name__=='__main__':unittest.main()
