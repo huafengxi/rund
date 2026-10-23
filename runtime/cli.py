@@ -69,7 +69,7 @@ def launcher(c,path):
     try:
         if executor_alive(c):return
         with (private/'rund.log').open('ab',buffering=0) as log:
-            child=subprocess.Popen([c['python'],'-B',str(Path(__file__).resolve().parents[1]/'rund.py'),'--config',str(path)],
+            child=subprocess.Popen([c['python'],'-B',str(Path(__file__).resolve().parents[1]/'rund.py'),'--root',str(path)],
                 stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True,
                 env=dict(HOME=c['home'],PATH=c['path'],LC_ALL='C.UTF-8',PYTHONDONTWRITEBYTECODE='1'))
         end=time.monotonic()+10
@@ -82,8 +82,8 @@ def launcher(c,path):
 
 
 def refresh(c):
-    if c.get('syncConfig'):
-        subprocess.run([c['python'],'-B',str(Path(__file__).resolve().parents[1]/'tools/sync.py'),'--config',c['syncConfig'],'once'],check=True,timeout=100)
+    subprocess.run([c['python'],'-B',str(Path(__file__).resolve().parents[1]/'tools/sync.py'),
+                    '--root',c['root'],'once'],check=True,timeout=100)
 
 
 def select(c,selector):
@@ -94,18 +94,13 @@ def select(c,selector):
 
 def set_desired(c,identifier,value,mode=None):
     d,_=services.get(c,identifier)
-    if d['kind']=='Service' and d['node']==c['node']:return services.set_intent(c,d,value)
-    origin=d['node'] if d['kind']=='Service' else c['publishers'][d['publisher']]
-    if origin==c['node']:
-        from .protocol import objects as shared_objects
-        if identifier not in shared_objects(c['sharedRoot']):publish(c['sharedRoot'],d,writer=c['node'],publishers=c['publishers'])
-        document=desired(c['sharedRoot'],identifier,value,writer=c['node'],publishers=c['publishers'],mode=mode)
-        refresh(c);return document
-    import shlex
-    argv=['desired',identifier,value]+(['--mode',mode] if mode else [])
-    result=subprocess.run(['ssh','-o','BatchMode=yes',origin,'exec "$HOME/.rund/rund/runctl" '+shlex.join(argv)],capture_output=True,text=True,timeout=130)
-    require(result.returncode==0,'publisher unavailable: '+result.stderr[-1000:])
-    return json.loads(result.stdout)
+    if d['kind']=='Service':return services.set_intent(c,d,value)
+    from .protocol import objects as shared_objects
+    if identifier not in shared_objects(c['sharedRoot']):
+        p,_=services.objects(c)[identifier]
+        from .config import declaration_revision
+        publish(c['sharedRoot'],d,revision=declaration_revision(p))
+    return desired(c['sharedRoot'],identifier,value,mode=mode)
 
 
 def workloads_closed(c):
@@ -141,9 +136,9 @@ def service(c,selector,action,config_path=None):
     raise ValueError('Service intent recorded; execution remains pending')
 
 
-def main(argv=None,default_config=None):
+def main(argv=None,default_root=None):
     p=argparse.ArgumentParser(prog='runctl',description='Node runtime, Service and Task control.')
-    p.add_argument('--config',type=Path,default=default_config or Path.home()/'.rund/config/rund.json')
+    p.add_argument('--root',type=Path,default=default_root or Path.home()/'.rund')
     sub=p.add_subparsers(dest='action',required=True)
     st=sub.add_parser('status');st.add_argument('selector',nargs='?')
     for name in ('start','stop'):
@@ -154,7 +149,7 @@ def main(argv=None,default_config=None):
     can=sub.add_parser('cancel');can.add_argument('id');can.add_argument('--mode',choices=('terminate','kill'),default='terminate')
     a=p.parse_args(argv)
     try:
-        c=node_config(a.config)
+        c=node_config(a.root)
         if a.action=='run':
             from .engine import Engine
             engine=Engine(c)
@@ -170,10 +165,10 @@ def main(argv=None,default_config=None):
                     d,state=services.get(c,a.selector);require(d['kind']=='Task','selector not found');result=dict(declaration=d,state=state)
             print(json.dumps(result))
         elif a.action in ('start','stop'):
-            print(json.dumps(service(c,a.selector,a.action,a.config) if a.selector else node_action(c,a.config,a.action)))
+            print(json.dumps(service(c,a.selector,a.action,a.root) if a.selector else node_action(c,a.root,a.action)))
         elif a.action=='publish':
             document=json.load(sys.stdin) if a.input=='-' else read(a.input)
-            result=services.publish(c,document) if document['kind']=='Service' else publish(c['sharedRoot'],document,writer=c['node'],publishers=c['publishers'])
+            result=services.publish(c,document) if document['kind']=='Service' else publish(c['sharedRoot'],document)
             print(result)
         else:
             if a.action=='cancel':

@@ -5,7 +5,7 @@ from pathlib import Path
 import signal
 import time
 import uuid
-from .config import FINAL,changed,discover,publish,EXEC_KEYS
+from .config import FINAL,changed,publish,declaration_revision
 from .process import Processes,expand
 from .store import digest,directory,lock,now,read,require,write
 from .admission import admitted
@@ -41,14 +41,18 @@ class Engine:
         found=services.objects(self.c);self.errors=[]
         direct,errors=services.declarations(self.c);self.errors.extend(errors)
         candidates={tid:(p,d) for tid,(p,d) in found.items() if d['kind']=='Task' and not d.get('service')}
-        candidates.update({tid:(services.state_path(self.c,tid).with_name('declaration.json'),d) for tid,(_,d) in direct.items()})
+        candidates.update({tid:(services.state_path(self.c,tid).with_name(source.name),d) for tid,(source,d) in direct.items()})
         for tid,(p,d) in candidates.items():
             if d['node']!=self.c['node']:continue
             try:
-                require(d['publisher'] in self.c['publishers'],'unknown publisher')
+                if 'nodes' in self.c:require(d['node'] in self.c['nodes'],'unknown execution node')
                 if d['kind']=='Task' and not p.exists():
-                    publish(self.root,d,writer=self.c['node'],publishers=self.c['publishers'])
-                if tid in self.accepted:changed(self.accepted[tid]['declaration'],d)
+                    publish(self.root,d,revision=declaration_revision(p))
+                if tid in self.accepted:
+                    previous=self.accepted[tid]
+                    require(declaration_revision(p)>=declaration_revision(previous['path']),'declaration revision rollback')
+                    if declaration_revision(p)==declaration_revision(previous['path']):require(previous['declaration']==d,'declaration version content conflict')
+                    changed(previous['declaration'],d)
                 self.accepted[tid]=dict(path=str(p.relative_to(self.root)),declaration=d)
             except (OSError,ValueError,KeyError,TypeError) as e:self.errors.append(tid+': '+str(e))
         write(self.accepted_path,self.accepted)
@@ -73,7 +77,6 @@ class Engine:
             missing=[f for f in d.get('needs',[]) if not Path(expand(f,self.c,d['id'])).is_file()]
             if missing:self.save(p,s,phase='preparing',reason='missing files: '+', '.join(missing));return
             if 'resources' in d:
-                require('admission' in self.c,'resources require an admission publisher')
                 if not admitted(self.c,d):
                     self.save(p,s,phase='queued',queuedAt=s.get('queuedAt') or now(),reason='awaiting global admission');return
             self.save(p,s,phase='starting',reason='spawn intent')

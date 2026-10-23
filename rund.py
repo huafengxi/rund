@@ -8,9 +8,9 @@ from runtime.engine import Engine
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--config',type=Path,default=Path.home()/'.rund/config/rund.json')
+    parser.add_argument('--root',type=Path,default=Path.home()/'.rund')
     args=parser.parse_args()
-    engine=Engine(node_config(args.config))
+    engine=Engine(node_config(args.root))
     try:engine.run()
     finally:engine.close()
 

@@ -46,6 +46,14 @@ def build(plan,output,cache):
         return result
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--plan',required=True,type=Path);p.add_argument('--output',required=True,type=Path);p.add_argument('--cache',required=True,type=Path);a=p.parse_args()
-    try:build(read(a.plan),a.output,a.cache)
+    p=argparse.ArgumentParser();p.add_argument('--plan',required=True,type=Path);p.add_argument('--output',required=True,type=Path);p.add_argument('--cache',required=True,type=Path);p.add_argument('--link',type=Path);a=p.parse_args()
+    try:
+        build(read(a.plan),a.output,a.cache)
+        if a.link:
+            directory(a.link.parent)
+            temporary=a.link.with_name('.link-'+uuid.uuid4().hex)
+            try:
+                temporary.symlink_to(a.output.resolve(),target_is_directory=True)
+                os.replace(temporary,a.link);sync_dir(a.link.parent)
+            finally:temporary.unlink(missing_ok=True)
     except (OSError,ValueError,KeyError,__import__('subprocess').SubprocessError) as e:print('prepare failed: '+str(e),file=sys.stderr);sys.exit(2)

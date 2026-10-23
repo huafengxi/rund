@@ -55,16 +55,12 @@ def reconcile(c, policy):
 
 
 class Scheduler:
-    def __init__(self, config):
-        require(set(config) <= {'nodeConfig', 'publisher', 'maxConcurrent', 'interval'}, 'unknown scheduler fields')
-        self.c = node_config(config['nodeConfig'])
-        self.policy = config
-        publisher = config['publisher']
-        require(self.c['publishers'].get(publisher) == self.c['node'], 'scheduler requires its origin node')
-        require(self.c.get('admission', {}).get('publisher') == publisher, 'scheduler admission publisher mismatch')
-        require(type(config['maxConcurrent']) is int and config['maxConcurrent'] > 0, 'positive maxConcurrent required')
-        interval = config.get('interval', .2)
-        require(type(interval) in (int, float) and interval > 0, 'positive scheduler interval required')
+    def __init__(self, root=None, *, max_concurrent=4, interval=.2):
+        self.c = node_config(root)
+        require(self.c['node']==self.c['hub'],'scheduler must run on the hub')
+        require(type(max_concurrent) is int and max_concurrent>0,'positive maxConcurrent required')
+        require(type(interval) in (int,float) and interval>0,'positive scheduler interval required')
+        self.policy=dict(maxConcurrent=max_concurrent,interval=interval)
         self.fd = lock(Path(self.c['privateRoot']) / 'locks/scheduler.lock')
         self.stopped = False
 

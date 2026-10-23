@@ -1,39 +1,41 @@
 """Checkout-backed Service declarations and hostname-selected common configuration."""
 import os
+import re
 from pathlib import Path
 import socket
-import sys
 import subprocess
-from .config import discover,changed,EXEC_KEYS
+from .config import discover,changed,declaration_revision
 from .store import read,write,require,digest
 
 
-def resolve_config(path,c):
-    root=path.parent;hosts={}
-    for line in (root/c['hosts']).read_text().splitlines():
+def resolve_config(prefix):
+    root=prefix/'config';hosts={};nodes=set();hub=None
+    for line in (root/'host-id').read_text().splitlines():
         line=line.split('#',1)[0].strip()
         if not line:continue
         host,node=line.split();host=host.lower()
-        require(host not in hosts,'duplicate hostname: '+host);hosts[host]=node
+        from .config import name
+        name(node)
+        require(host not in hosts,'duplicate hostname: '+host)
+        require(node not in nodes,'duplicate node: '+node)
+        hosts[host]=node;nodes.add(node)
+        if hub is None:hub=node
+    require(hub is not None,'host-id must contain a hub')
     hostname=socket.gethostname().lower()
     require(hostname in hosts,'hostname not registered: '+hostname)
-    home=str(Path.home());prefix=str(root.parent)
-    mapping={'home':home,'root':prefix,'config':str(root),'node':hosts[hostname]}
-    def expand(v):
-        if isinstance(v,str):
-            for k,x in mapping.items():v=v.replace('${'+k+'}',x)
-            return v
-        if isinstance(v,dict):return {k:expand(x) for k,x in v.items()}
-        if isinstance(v,list):return [expand(x) for x in v]
-        return v
-    result=expand({k:v for k,v in c.items() if k not in ('format','hosts')})
-    result.update(node=hosts[hostname],home=home,sharedRoot=prefix+'/shared',privateRoot=prefix+'/local',
-                  configFile=str(path),configRoot=str(root),servicesRoot=str(root/'objects/services'),
-                  runtimeSource=str(Path(__file__).resolve().parents[1]))
-    result['runtimeRevision']=subprocess.check_output(['git','-C',result['runtimeSource'],'rev-parse','HEAD'],text=True).strip()
-    result.setdefault('python',sys.executable)
-    result.setdefault('path',os.environ.get('PATH',os.defpath))
-    return result
+    home=Path.home();runtime=Path(__file__).resolve().parents[1]
+    bins=[prefix/'local/tools/bin',home/'miniconda3/bin',home/'.local/node/bin',home/'.local/bin',home/'bin']
+    nvm=home/'.nvm/versions/node'
+    if nvm.exists():
+        versions=sorted((p for p in nvm.iterdir() if re.fullmatch(r'v[0-9]+(?:\.[0-9]+)*',p.name)),
+                        key=lambda p:tuple(int(x) for x in p.name[1:].split('.')),reverse=True)
+        bins.extend(p/'bin' for p in versions)
+    bins.extend(Path(p) for p in ('/opt/homebrew/bin','/opt/homebrew/sbin','/usr/local/bin','/usr/bin','/bin','/usr/sbin','/sbin'))
+    return dict(node=hosts[hostname],hub=hub,nodes=sorted(nodes),home=str(home),root=str(prefix),
+                sharedRoot=str(prefix/'shared'),privateRoot=str(prefix/'local'),
+                configRoot=str(root),servicesRoot=str(root/'objects/services'),runtimeSource=str(runtime),
+                python=str(home/'miniconda3/bin/python3'),path=os.pathsep.join(map(str,bins)),interval=.2,
+                runtimeRevision=subprocess.check_output(['git','-C',str(runtime),'rev-parse','HEAD'],text=True).strip())
 
 
 def declarations(c):
@@ -71,22 +73,25 @@ def publish(c,d):
     require(d['kind']=='Service','Service declaration required')
     from .config import publish as put
     require('servicesRoot' in c,'configuration checkout required for Service publication')
-    return put(c['servicesRoot'],d,writer=c['node'],publishers=c['publishers'],
-               path=Path(c['servicesRoot'])/d['id']/'declaration.json')
+    return put(c['servicesRoot'],d)
 
 
 def objects(c):
-    """Task protocol plus checkout inputs; shared Service declarations are history."""
+    """Merge immutable checkout Task versions with shared snapshots/updates."""
     shared,errors=discover(c['sharedRoot'])
     result={i:(p,d) for i,(p,d) in shared.items() if d['kind']=='Task'}
     if c.get('configRoot'):
         source,issues=discover(Path(c['configRoot'])/'objects');errors.extend(issues)
-        for i,(_,d) in source.items():
-            if d['kind']=='Service':require('task' not in d,'direct Service execution fields required')
+        for i,(source_path,d) in source.items():
             if i in result:
-                changed(d,result[i][1]);d=result[i][1]
+                other_path,other=result[i]
+                left,right=declaration_revision(source_path),declaration_revision(other_path)
+                if left==right:require(d==other,'declaration version content conflict: '+i)
+                elif left<right:changed(d,other)
+                else:changed(other,d)
+                if left<=right:continue
             folder='services' if d['kind']=='Service' else 'tasks'
-            result[i]=(Path(c['sharedRoot'])/folder/i/'declaration.json',d)
+            result[i]=(Path(c['sharedRoot'])/folder/i/source_path.name,d)
     require(not errors,'; '.join(errors))
     return result
 

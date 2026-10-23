@@ -20,15 +20,14 @@ SOURCE=Path(__file__).resolve().parents[1]
 class CLI(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(prefix='rund-direct-');self.base=Path(self.temp.name)
-        self.repo=self.base/'config';self.config=self.repo/'rund.json'
-        write(self.config,dict(format='rund/v1',hosts='host-id',python=sys.executable,path=os.environ['PATH'],interval=.03,publishers={'operator':'fixture','rund-fixture':'fixture'}))
+        self.repo=self.base/'config';self.repo.mkdir();self.config=self.base
         (self.repo/'host-id').write_text(socket.gethostname()+' fixture\n')
-        self.declaration=dict(kind='Service',id='demo',name='demo',publisher='operator',node='fixture',revision=1,version=1,
+        self.declaration=dict(kind='Service',id='demo',name='demo',node='fixture',version=1,
                               desired='online',restart='always',argv=[sys.executable,'-c','import time;time.sleep(100)'])
-        self.path=self.repo/'objects/services/demo/declaration.json';write(self.path,self.declaration)
+        self.path=self.repo/'objects/services/demo/declaration-v1.json';write(self.path,self.declaration)
         self.c=node_config(self.config)
     def call(self,*args,check=True):
-        p=subprocess.run([sys.executable,'-B',str(SOURCE/'runctl'),'--config',str(self.config),*args],capture_output=True,text=True,timeout=20)
+        p=subprocess.run([sys.executable,'-B',str(SOURCE/'runctl'),'--root',str(self.config),*args],capture_output=True,text=True,timeout=20)
         if check:self.assertEqual(p.returncode,0,p.stderr)
         return json.loads(p.stdout) if check else p
     def until(self,fn):
@@ -53,7 +52,7 @@ class CLI(unittest.TestCase):
         self.assertEqual(frozen,read(self.base/'local/services/demo/runs'/first['run']/'state.json'))
     def test_config_revision_restarts_direct_process_and_resets_intent(self):
         self.call('start');self.until(lambda:self.call('status','demo')['actual']=='online');first=self.call('status','demo')
-        self.call('stop','demo');write(self.path,dict(self.declaration,revision=2,version=2,env={'EXAMPLE':'2'}))
+        self.call('stop','demo');write(self.path.with_name('declaration-v2.json'),dict(self.declaration,version=2,env={'EXAMPLE':'2'}))
         self.until(lambda:self.call('status','demo')['actual']=='online')
         self.assertEqual(self.call('status','demo')['run_version'],2);self.assertNotEqual(first['pid'],self.call('status','demo')['pid'])
     def test_unknown_hostname_and_duplicate_mapping_fail(self):
@@ -62,7 +61,7 @@ class CLI(unittest.TestCase):
         with (self.repo/'host-id').open('a') as f:f.write(socket.gethostname()+' other\n')
         with self.assertRaisesRegex(ValueError,'duplicate hostname'):node_config(self.config)
     def test_foreground_runtime_has_no_external_supervisor(self):
-        p=subprocess.Popen([sys.executable,'-B',str(SOURCE/'runctl'),'--config',str(self.config),'run'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        p=subprocess.Popen([sys.executable,'-B',str(SOURCE/'runctl'),'--root',str(self.config),'run'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
         try:
             self.until(lambda:self.call('status')['rund']['actual']=='online');self.assertEqual(self.call('status')['rund']['pid'],p.pid)
             self.until(lambda:self.call('status','demo')['actual']=='online');self.call('stop');self.assertEqual(p.wait(timeout=8),0)
@@ -70,9 +69,9 @@ class CLI(unittest.TestCase):
             if p.poll() is None:p.kill();p.wait()
             p.stderr.close()
     def test_static_task_cancellation_uses_protocol_and_freezes(self):
-        d=dict(kind='Task',id='static-task',publisher='operator',node='fixture',revision=1,desired='run',
+        d=dict(kind='Task',id='static-task',node='fixture',desired='run',
                argv=[sys.executable,'-c','raise SystemExit(99)'],needs=[str(self.base/'missing')])
-        source=self.repo/'objects/tasks/static-task/declaration.json';write(source,d);before=source.read_bytes()
+        source=self.repo/'objects/tasks/static-task/declaration-v1.json';write(source,d);before=source.read_bytes()
         self.call('start');self.until(lambda:(get(self.c,'static-task')[1] or {}).get('phase')=='preparing')
         self.call('cancel','static-task');self.until(lambda:get(self.c,'static-task')[1]['phase']=='canceled')
         self.assertEqual(before,source.read_bytes());state=get(self.c,'static-task')[1]
@@ -82,6 +81,6 @@ class CLI(unittest.TestCase):
     def test_default_configuration_is_checkout(self):
         with patch('runtime.cli.Path.home',return_value=self.base),patch('runtime.cli.node_config',side_effect=ValueError('fixture')) as load:
             self.assertEqual(main(['status']),2)
-        self.assertEqual(load.call_args.args[0],self.base/'.rund/config/rund.json')
+        self.assertEqual(load.call_args.args[0],self.base/'.rund')
 
 if __name__=='__main__':unittest.main()

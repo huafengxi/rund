@@ -10,9 +10,9 @@ def get(root,id):
     found=objects(root);require(id in found,'object not found: '+id);p,d=found[id]
     s=p.with_name('state.json');return d,read(s) if s.exists() else None
 
-def desired(root,id,value,*,writer,publishers,mode=None):
+def desired(root,id,value,*,mode=None):
     d,s=get(root,id)
     if d['desired']==value:return d
-    d=dict(d,desired=value,revision=d['revision']+1)
+    d=dict(d,desired=value)
     if mode:d['cancelMode']=mode
-    publish(root,d,writer=writer,publishers=publishers);return d
+    publish(root,d);return d

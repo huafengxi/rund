@@ -17,14 +17,18 @@ from runtime.store import read,write
 class Scheduling(unittest.TestCase):
     def setUp(self):
         self.base=Path(tempfile.mkdtemp(prefix='rund-scheduling-'))
-        self.root=self.base/'shared';self.engines=[]
+        self.root=self.base/'shared';self.root.mkdir();self.engines=[]
         for node in ('a','b'):
-            c=dict(node=node,sharedRoot=str(self.root),privateRoot=str(self.base/node),python=sys.executable,home=str(self.base),path=os.environ['PATH'],publishers={'operator':'a','rund-a':'a','rund-b':'b','scheduler':'a'},version=1,admission={'publisher':'scheduler'})
-            c.update(configRoot=str(self.base/'config'),servicesRoot=str(self.base/'config/objects/services'))
-            write(self.base/(node+'.json'),c)
+            root=self.base/node;(root/'config').mkdir(parents=True)
+            import socket
+            (root/'config/host-id').write_text((socket.gethostname()+' a\n') if node=='a' else 'hub-host a\n'+socket.gethostname()+' b\n')
+            (root/'shared').symlink_to(self.root,target_is_directory=True)
+            if node=='a':(root/'config/objects').mkdir()
+            else:(root/'config/objects').symlink_to(self.base/'a/config/objects',target_is_directory=True)
+            from runtime.config import node_config
+            c=node_config(root)
             self.engines.append(Engine(c))
-        self.policy=dict(nodeConfig=str(self.base/'a.json'),publisher='scheduler',maxConcurrent=2,interval=.02)
-        self.scheduler=Scheduler(self.policy)
+        self.scheduler=Scheduler(self.base/'a',max_concurrent=2,interval=.02)
     def tearDown(self):
         if self.scheduler:self.scheduler.close()
         for o in self.engines:
@@ -35,8 +39,8 @@ class Scheduling(unittest.TestCase):
                 p.wait(timeout=5)
             o.close()
     def put(self,tid,node,resources):
-        d=dict(kind='Task',id=tid,publisher='operator',node=node,revision=1,desired='run',resources=resources,argv=[sys.executable,'-c','import time;time.sleep(100)'])
-        publish(self.root,d,writer='a',publishers=self.engines[0].c['publishers'])
+        d=dict(kind='Task',id=tid,node=node,desired='run',resources=resources,argv=[sys.executable,'-c','import time;time.sleep(100)'])
+        publish(self.root,d)
     def state(self,tid):return get(self.root,tid)[1]
     def rounds(self,n=3):
         for _ in range(n):
@@ -54,7 +58,7 @@ class Scheduling(unittest.TestCase):
         self.put('second','b',['repo']);self.rounds()
         self.assertEqual(self.state('first')['phase'],'running')
         self.assertEqual(self.state('second')['phase'],'queued')
-        desired(self.root,'first','cancel',writer='a',publishers=self.engines[0].c['publishers'],mode='kill')
+        desired(self.root,'first','cancel',mode='kill')
         self.until(lambda:self.state('second')['phase']=='running')
         self.assertTrue(self.state('first')['waitObserved'])
         self.assertEqual(self.state('first')['phase'],'canceled')
@@ -83,8 +87,8 @@ class Scheduling(unittest.TestCase):
         self.assertEqual(self.state('waiting')['phase'],'running')
 
     def test_scheduler_origin_and_single_writer_lock(self):
-        with self.assertRaises((OSError,ValueError)):Scheduler(self.policy)
-        with self.assertRaises(ValueError):Scheduler(dict(self.policy,nodeConfig=str(self.base/'b.json')))
+        with self.assertRaises((OSError,ValueError)):Scheduler(self.base/'a')
+        with self.assertRaises(ValueError):Scheduler(self.base/'b')
 
     def test_missing_ledger_refuses_new_admission(self):
         self.put('running','a',[]);self.rounds()
@@ -98,10 +102,9 @@ class Scheduling(unittest.TestCase):
 
     def test_scheduler_is_an_ordinary_service_and_can_restart_independently(self):
         self.scheduler.close();self.scheduler=None
-        config=self.base/'scheduler.json';write(config,self.policy)
-        declaration=dict(kind='Service',id='scheduler-service',publisher='operator',node='a',revision=1,
+        declaration=dict(kind='Service',id='scheduler-service',node='a',
                          version=1,desired='online',restart='always',argv=[sys.executable,'-B',
-                         str(Path(__file__).resolve().parents[1]/'tools/scheduler.py'),'--config',str(config)])
+                         str(Path(__file__).resolve().parents[1]/'tools/scheduler.py'),'--root',str(self.base/'a'),'--max-concurrent','2'])
         from runtime.services import publish as put_service,get as get_service,set_intent
         c=self.engines[0].c;put_service(c,declaration)
         self.put('first','b',['repo']);self.until(lambda:self.state('first') and self.state('first')['phase']=='running')
@@ -120,7 +123,7 @@ class Scheduling(unittest.TestCase):
         def state(node,tid):return get_service(self.engines[node].c,tid)[1]
         ds=[]
         for i,node in enumerate(('a','b')):
-            d=dict(kind='Service',id='svc-'+node,publisher='operator',node=node,revision=1,version=1,desired='online',restart='manual',
+            d=dict(kind='Service',id='svc-'+node,node=node,version=1,desired='online',restart='manual',
                    resources=['exclusive'],argv=[sys.executable,'-c','import time;time.sleep(100)'])
             put_service(self.engines[0].c,d);ds.append(d)
         self.until(lambda:state(0,'svc-a') and state(0,'svc-a')['phase']=='running')
@@ -133,12 +136,12 @@ class Scheduling(unittest.TestCase):
     def test_offline_service_can_start_and_replace_its_resource_version(self):
         from runtime.services import publish as put_service,get as get_service,set_intent
         c=self.engines[0].c
-        d=dict(kind='Service',id='resource-service',publisher='operator',node='a',revision=1,version=1,desired='offline',restart='manual',
+        d=dict(kind='Service',id='resource-service',node='a',version=1,desired='offline',restart='manual',
                resources=['repo'],argv=[sys.executable,'-c','import time;time.sleep(100)'])
         put_service(c,d);set_intent(c,d,'online')
         self.until(lambda:(get_service(c,d['id'])[1] or {}).get('phase')=='running')
         first=get_service(c,d['id'])[1]['runId']
-        updated=dict(d,version=2,revision=2,desired='online',env={'VERSION':'2'});put_service(c,updated)
+        updated=dict(d,version=2,desired='online',env={'VERSION':'2'});put_service(c,updated)
         self.until(lambda:(get_service(c,d['id'])[1] or {}).get('runVersion')==2 and get_service(c,d['id'])[1]['phase']=='running')
         self.assertNotEqual(first,get_service(c,d['id'])[1]['runId'])
 

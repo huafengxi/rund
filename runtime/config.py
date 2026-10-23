@@ -1,13 +1,12 @@
 """Object declaration contract. Paths organize files; kind and id define objects."""
-import copy
 import os
 import re
 from pathlib import Path
-from .store import read,require,digest
+from .store import read,require
 
 FINAL=frozenset(('succeeded','failed','canceled'))
 EXEC_KEYS=frozenset(('argv','needs','cwd','env','resources'))
-COMMON=frozenset(('kind','id','name','publisher','node','revision'))
+COMMON=frozenset(('kind','id','name','node'))
 
 def name(v):require(isinstance(v,str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,159}',v),'invalid object identity')
 def text(v):require(isinstance(v,str) and v and '\0' not in v,'nonempty text required')
@@ -28,9 +27,8 @@ def execution(e):
 
 def validate(d):
     require(isinstance(d,dict),'declaration object required')
-    for k in ('kind','id','publisher','node','revision'):require(k in d,'missing '+k)
-    for k in ('id','publisher','node'):name(d[k])
-    require(type(d['revision']) is int and d['revision']>0,'positive revision required')
+    for k in ('kind','id','node'):require(k in d,'missing '+k)
+    for k in ('id','node'):name(d[k])
     if 'name' in d:text(d['name'])
     if d['kind']=='Task':
         require(set(d)<=COMMON|EXEC_KEYS|{'desired','cancelMode','service'},'unknown Task fields')
@@ -40,12 +38,11 @@ def validate(d):
         if 'service' in d:
             s=d['service'];require(isinstance(s,dict) and set(s)=={'id','version','declarationDigest'},'invalid Service reference');name(s['id'])
     elif d['kind']=='Service':
-        require(set(d)<=COMMON|EXEC_KEYS|{'version','desired','restart','task','probe'},'unknown Service fields')
+        require(set(d)<=COMMON|EXEC_KEYS|{'version','desired','restart','probe'},'unknown Service fields')
         require(type(d.get('version')) is int and d['version']>0,'positive Service version required')
         require(d.get('desired') in ('online','offline'),'Service desired must be online/offline')
         require(d.get('restart') in ('manual','on-failure','always'),'invalid restart policy')
-        require(not ('task' in d and EXEC_KEYS.intersection(d)), 'mixed Service execution formats')
-        execution(d['task'] if 'task' in d else {k:v for k,v in d.items() if k in EXEC_KEYS})
+        execution({k:v for k,v in d.items() if k in EXEC_KEYS})
         if 'probe' in d:
             p=d['probe'];require(isinstance(p,dict),'probe object required')
             require(('http' in p)^('cmd' in p),'one probe type required')
@@ -59,53 +56,67 @@ def validate(d):
 
 def changed(before,after):
     validate(after)
-    require(all(before[k]==after[k] for k in ('kind','id','publisher','node')),'object identity/writer/target cannot change')
-    require(after['revision']>=before['revision'],'declaration revision rollback')
-    if after['revision']==before['revision']:
-        require(after==before,'revision content conflict');return
+    require(all(before[k]==after[k] for k in ('kind','id','node')),'object identity/target cannot change')
     if after['kind']=='Task':
-        a={k:v for k,v in after.items() if k not in ('desired','cancelMode','revision')}
-        b={k:v for k,v in before.items() if k not in ('desired','cancelMode','revision')}
+        a={k:v for k,v in after.items() if k not in ('desired','cancelMode')}
+        b={k:v for k,v in before.items() if k not in ('desired','cancelMode')}
         require(a==b,'Task execution is immutable')
-        require(before['desired']!='cancel' or after==dict(before,revision=after['revision']),'Task cancellation is irreversible')
+        require(before['desired']!='cancel' or after==before,'Task cancellation is irreversible')
     else:
         require(after['version']>=before['version'],'Service version rollback')
-        keys=tuple(EXEC_KEYS)+('task','restart','probe')
+        keys=tuple(EXEC_KEYS)+('restart','probe')
         require(all(before.get(k)==after.get(k) for k in keys) or after['version']>before['version'],'changed execution requires higher Service version')
 
-def node_config(path):
-    path=Path(path).expanduser().resolve();c=read(path)
-    if c.get('format')=='rund/v1':
-        from .services import resolve_config
-        c=resolve_config(path,c)
-    for k in ('node','sharedRoot','privateRoot','python','home','path','publishers'):require(k in c,'missing node '+k)
-    name(c['node'])
-    for k in ('sharedRoot','privateRoot','python','home'):require(Path(c[k]).is_absolute(),'absolute '+k+' required')
-    a,b=Path(c['sharedRoot']),Path(c['privateRoot']);require(a!=b and a not in b.parents and b not in a.parents,'shared/private roots overlap')
-    require(c['publishers'].get('rund-'+c['node'])==c['node'],'node rund publisher required')
-    require('scheduler' not in c,'scheduler policy belongs to a Service configuration')
-    if 'admission' in c:
-        a=c['admission'];require(isinstance(a,dict) and set(a)=={'publisher'},'admission publisher required');name(a['publisher'])
-        require(a['publisher'] in c['publishers'],'unknown admission publisher')
-    return c
+
+def node_config(root=None):
+    from .services import resolve_config
+    return resolve_config(Path(root or Path.home()/'.rund').expanduser().resolve())
+
+
+DECLARATION=re.compile(r'declaration-v([1-9][0-9]*)\.json')
+
+def declaration_revision(path):
+    match=DECLARATION.fullmatch(Path(path).name)
+    require(match is not None,'versioned declaration filename required')
+    return int(match[1])
+
 
 def discover(root):
     result={};errors=[]
-    paths=[]
     for folder,dirs,files in os.walk(root):
         if Path(folder)==Path(root):dirs[:]=[d for d in dirs if d not in ('agents','configs','gc','scheduling')]
-        if 'declaration.json' in files:paths.append(Path(folder)/'declaration.json')
-    for p in sorted(paths):
+        paths=sorted((Path(folder)/f for f in files if DECLARATION.fullmatch(f)),key=declaration_revision)
+        prior=None
         try:
-            d=validate(read(p));require(d['id'] not in result,'duplicate object identity: '+d['id']);result[d['id']]=(p,d)
-        except (ValueError,OSError,KeyError,TypeError) as e:errors.append(str(p)+': '+str(e))
+            for path in paths:
+                d=validate(read(path))
+                if prior is not None:changed(prior,d)
+                prior=d
+            if paths:
+                require(prior['id'] not in result,'duplicate object identity: '+prior['id'])
+                result[prior['id']]=(paths[-1],prior)
+        except (ValueError,OSError,KeyError,TypeError) as e:errors.append(str(folder)+': '+str(e))
     return result,errors
 
-def publish(root,d,*,writer,publishers,path=None):
-    from .store import write
-    validate(d);require(publishers.get(d['publisher'])==writer,'not declaration origin writer')
+
+def publish(root,d,*,path=None,revision=None):
+    from .store import write_once
+    validate(d)
     found,errors=discover(root);require(not errors,'; '.join(errors))
     prior=found.get(d['id'])
-    if prior:changed(prior[1],d);p=prior[0]
-    else:p=Path(path) if path else Path(root)/('services' if d['kind']=='Service' else 'tasks')/d['id']/'declaration.json'
-    write(p,d);return p
+    if prior:
+        old,previous=prior
+        if previous==d and path is None and revision is None:return old
+        changed(previous,d)
+        number=declaration_revision(old)+1 if revision is None else revision
+        require(number>=declaration_revision(old),'declaration revision rollback')
+        folder=old.parent
+    else:
+        number=1 if revision is None else revision
+        folder=Path(root)/('services' if d['kind']=='Service' else 'tasks')/d['id']
+    require(type(number) is int and number>0,'positive declaration revision required')
+    p=Path(path) if path else folder/('declaration-v'+str(number)+'.json')
+    require(declaration_revision(p)==number,'declaration filename revision mismatch')
+    if prior and number==declaration_revision(prior[0]):require(previous==d,'declaration version content conflict')
+    write_once(p,d)
+    return p

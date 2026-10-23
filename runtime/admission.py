@@ -4,7 +4,7 @@ from .store import digest, read
 
 
 def execution_digest(d):
-    return digest({k: v for k, v in d.items() if k not in ('revision', 'desired', 'cancelMode')})
+    return digest({k: v for k, v in d.items() if k not in ('desired', 'cancelMode')})
 
 
 def admission_path(c):
@@ -18,5 +18,4 @@ def admitted(c, d):
     if not p.exists():
         return False
     s = read(p)
-    origin = c['publishers'][c['admission']['publisher']]
-    return s.get('node') == origin and s.get('grants', {}).get(d['id']) == execution_digest(d)
+    return s.get('node') == c['hub'] and s.get('grants', {}).get(d['id']) == execution_digest(d)

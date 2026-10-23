@@ -5,14 +5,14 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from runtime.scheduling import Scheduler
-from runtime.store import read
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', required=True, type=Path)
+    parser.add_argument('--root', type=Path)
+    parser.add_argument('--max-concurrent', type=int, default=4)
     args = parser.parse_args()
-    scheduler = Scheduler(read(args.config))
+    scheduler = Scheduler(args.root,max_concurrent=args.max_concurrent)
     try:
         scheduler.run()
     finally:
