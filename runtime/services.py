@@ -83,7 +83,8 @@ def objects(c):
         source,issues=discover(Path(c['configRoot'])/'objects');errors.extend(issues)
         for i,(_,d) in source.items():
             if d['kind']=='Service':require('task' not in d,'direct Service execution fields required')
-            if i in result:require(result[i][1]==d,'checkout/protocol declaration conflict: '+i)
+            if i in result:
+                changed(d,result[i][1]);d=result[i][1]
             folder='services' if d['kind']=='Service' else 'tasks'
             result[i]=(Path(c['sharedRoot'])/folder/i/'declaration.json',d)
     require(not errors,'; '.join(errors))

@@ -97,6 +97,8 @@ def set_desired(c,identifier,value,mode=None):
     if d['kind']=='Service' and d['node']==c['node']:return services.set_intent(c,d,value)
     origin=d['node'] if d['kind']=='Service' else c['publishers'][d['publisher']]
     if origin==c['node']:
+        from .protocol import objects as shared_objects
+        if identifier not in shared_objects(c['sharedRoot']):publish(c['sharedRoot'],d,writer=c['node'],publishers=c['publishers'])
         document=desired(c['sharedRoot'],identifier,value,writer=c['node'],publishers=c['publishers'],mode=mode)
         refresh(c);return document
     import shlex
