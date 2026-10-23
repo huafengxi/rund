@@ -1,0 +1,39 @@
+{
+  "repository": "agents-sync",
+  "revision": "94014ece5908b0020c61b9c12ef5e85a010e833e",
+  "files": {
+    "bench_pull_manifest.py": "632930685dd1fc562f0d04c95e6524cd406b6e60",
+    "delete_contract.py": "38d268d18465cb96d936762b9b31f3637da2c61c",
+    "foreground_transport.py": "d13999524f8f8fbf64b31ac86e75bf2b759f3770",
+    "gc.py": "dcf3644f2e3c3bb15a5afb4f4816f3969359cb0d",
+    "mac-rsync-patch/README.md": "23b407e7b2c2628a49ea3d7a0cd6d2b61ac54a13",
+    "mac-rsync-patch/install.sh": "0e39460f7e4a1014a0333e1d88c061d3623007d0",
+    "mac-rsync-patch/rsync-chown-dirs-skip.patch": "1d0e456d28c604414af5a9b996094069b8b22827",
+    "mac-rsync-patch/rsync-getgrouplist.patch": "15ddb2948ef60507943efbb1b64781d8fd4479fa",
+    "mac-rsync-patch/rsync.rb": "d44b76b25a956544bb2b06d233df56a6bf4e8d07",
+    "platform_paths.py": "85821008051c18510c216dbce75cc37958d7cc63",
+    "probe_scratch.py": "b049f04d1cea04f5d5fea0e569c4fc9c72a9b23a",
+    "replica-tag.py": "35a4c50ee226bc7c59af8cd3e373c3d356bea029",
+    "ssh-sync.py": "57bea9ba4bdd55df56c4307ba34fd0f1807e3628",
+    "test_delete_contract.py": "1b2363aede8be61c8bd7bb8bde3425c3aaca1943",
+    "test_foreground.py": "4c325309234fae7bd97062aadb231af6b1c77d3a",
+    "test_gc.py": "13cf9c5d6a02bb77c2723d4355292b043b479c4a",
+    "test_independent.py": "710d115464e4e790602d452443e89b80c0d31e18",
+    "test_manifest_foreground.py": "057ed325f3fc4ded88f391aef14a58882241a381",
+    "test_minimal_tree.py": "b9572ec6e9e3975bbb9e06befee29e4004a02257",
+    "test_platform_paths.py": "2e70ccac64b31b79bd159c733ca0c8b05902cb64",
+    "test_probe_scratch.py": "8cff2f1595b7df96988b2635dacea099d7aa7a9a",
+    "test_protect.py": "6a268c050310aa84c83ca62fcd3ca05b61d92225",
+    "test_pull_manifest.py": "e89c8fc95b7de0ce8435f0417b5e8fd0ab3aa534",
+    "test_replica_tag.py": "330f9facb31a31d7d910065ad500187d94b411bc",
+    "test_shared_tree.py": "0263e761bcc2f39d3aff878321a6d7111335431a",
+    "test_watch.py": "1a977ade77682060a3a31cedd7d59526c458317e"
+  },
+  "adaptations": {
+    "gc.py": "Use the rund hub-directory convention and explicit caller overrides.",
+    "replica-tag.py": "Read the caller-supplied hub identity.",
+    "ssh-sync.py": "Document the existing SSH configuration default.",
+    "tests": "Supply complete standalone imports, own fixture cleanup, and prefixed protected paths.",
+    "platform_paths.py": "Point provenance at the bundled source manifest."
+  }
+}

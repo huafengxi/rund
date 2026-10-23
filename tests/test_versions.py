@@ -58,10 +58,11 @@ class Versions(unittest.TestCase):
         self.assertEqual(read(folder/'declaration-v4.json'),self.d)
         self.assertEqual(read(self.root/'local/accepted.json')['demo']['path'],'tasks/demo/declaration-v4.json')
     def test_sync_uses_hub_and_conventional_transport_paths(self):
-        tool=self.root/'local/tools/transport/sync/ssh-sync.py';tool.parent.mkdir(parents=True);tool.write_text('')
         argv,env=command(self.root,'once')
         self.assertIn('hub:'+str(self.root/'hub/shared'),argv)
         self.assertIn('--once',argv)
+        self.assertEqual(Path(argv[2]),Path(__file__).resolve().parents[1]/'sync/ssh-sync.py')
+        self.assertFalse((self.root/'local/tools/transport').exists())
         self.assertEqual(env['SSH_SYNC_CONFIG'],str(Path.home()/'.ssh/config'))
         self.assertFalse((self.root/'config/sync.json').exists())
 

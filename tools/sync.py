@@ -30,8 +30,8 @@ def hub_paths(c):
 
 def command(root,action):
     c=node_config(root);private=Path(c['privateRoot'])
-    tool=private/'tools/transport/sync/ssh-sync.py'
-    require(tool.is_file(),'transport is not prepared: '+str(tool))
+    tool=Path(__file__).resolve().parents[1]/'sync/ssh-sync.py'
+    require(tool.is_file(),'bundled transport is missing: '+str(tool))
     shared,remote_probe=hub_paths(c)
     probe=directory(private/'apps/agents-sync/probe');probe.chmod(0o700)
     directory(c['sharedRoot']);directory(private/'locks')

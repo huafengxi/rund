@@ -129,6 +129,6 @@ scheduler 写 shared/scheduling/state.json，包含 node、grants、maxConcurren
 
 shared 容纳 Task 协议、Service 状态、调度记录和 agents 业务文件。agents、configs、gc、scheduling 为保留命名空间，不扫描其中的业务声明。
 
-tools/sync.py 调用 local/tools/transport/sync/ssh-sync.py；该路径由普通 prepare Task 使用 --link 装配。hub 交换树为 hub 用户 ~/.rund/hub/shared，探测目录为 ~/.rund/hub/probe，远端 home 经 SSH 发现；本机探测目录为 local/apps/agents-sync/probe。锁固定为 local/locks/shared-sync.lock，SSH 使用 ~/.ssh/config，interval=15、minCycle=3。
+tools/sync.py 直接调用当前机制 checkout 的 sync/ssh-sync.py。shared-sync 和 scheduler 均由普通 Service 声明启动；同步实现随机制源码发布。hub 交换树为 hub 用户 ~/.rund/hub/shared，探测目录为 ~/.rund/hub/probe，远端 home 经 SSH 发现；本机探测目录为 local/apps/agents-sync/probe。锁固定为 local/locks/shared-sync.lock，SSH 使用 ~/.ssh/config，interval=15、minCycle=3。
 
 常驻与一次性同步共用 cycleLock。同步工具当前按原件/replica 运输；并发同路径冲突的检测、保存与收敛归同步层，rund 不提供仲裁。

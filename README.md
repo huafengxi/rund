@@ -8,7 +8,7 @@ Service 表达常驻程序并直接拥有进程状态；Task 表达一次性执�
 
 runtime/config.py 定义声明合同；services.py 解析 host-id 与配置仓对象；engine.py 协调执行；process.py/native.py 处理原生进程身份、真实 wait 与组收口；cli.py 提供节点与对象操作。共享事实位于 shared，本机日志、锁、源码缓存与应用数据位于 local。
 
-scheduler 是部署在 hub 的普通 Service，保存全局资源与并发 grant；节点只检查 grant 并执行本机进程。tools/prepare.py、env_exec.py、sync.py、external_exec.py 分别处理固定业务源码、内存凭据注入、共享树运输与官方管理器适配。同步工具由普通准备 Task 装配到 local/tools/transport，hub 交换目录为该用户 ~/.rund/hub。
+scheduler 是部署在 hub 的普通 Service，保存全局资源与并发 grant；节点只检查 grant 并执行本机进程。tools/prepare.py、env_exec.py、sync.py、external_exec.py 分别处理固定业务源码、内存凭据注入、共享树运输与官方管理器适配。共享树运输与 GC 实现位于 sync/，随机制 checkout 提供；shared-sync 直接运行其中的同步工具，hub 交换目录为该用户 ~/.rund/hub。
 
 运行机制源码直接使用 checkout。升级前收口 Task 并通过 runctl stop 停止节点，更新 checkout 后 start。Service 的本机启停意图位于 local，绑定声明摘要；声明变化后采用新声明的默认 desired。配置仓保存声明和附件，运行状态保存在运行目录。
 
