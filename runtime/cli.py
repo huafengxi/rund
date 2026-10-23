@@ -93,7 +93,7 @@ def set_desired(c,identifier,value,mode=None):
         return document
     import shlex
     argv=['desired',identifier,value]+(['--mode',mode] if mode else [])
-    result=subprocess.run(['ssh','-o','BatchMode=yes',origin,'exec "$HOME/.agentd/bin/runctl" '+shlex.join(argv)],capture_output=True,text=True,timeout=130)
+    result=subprocess.run(['ssh','-o','BatchMode=yes',origin,'exec "$HOME/.rund/bin/runctl" '+shlex.join(argv)],capture_output=True,text=True,timeout=130)
     require(result.returncode==0,'publisher unavailable: '+result.stderr[-1000:])
     return json.loads(result.stdout)
 
@@ -133,7 +133,7 @@ def service(c,selector,action,config_path=None):
 
 def main(argv=None,default_config=None):
     p=argparse.ArgumentParser(prog='runctl',description='Single-writer Service and Task lifecycle.')
-    p.add_argument('--config',type=Path,default=default_config or Path.home()/'.agentd/local/node.json')
+    p.add_argument('--config',type=Path,default=default_config or Path.home()/'.rund/local/node.json')
     sub=p.add_subparsers(dest='action',required=True)
     st=sub.add_parser('status');st.add_argument('selector',nargs='?')
     for name in ('start','stop','run'):

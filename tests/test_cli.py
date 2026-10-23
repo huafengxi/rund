@@ -107,6 +107,30 @@ class CLI(unittest.TestCase):
         self.assertTrue(state['waitObserved'])
 
 class RoutedDesired(unittest.TestCase):
+    def test_default_configuration_uses_rund_root(self):
+        from unittest.mock import patch
+        from contextlib import redirect_stdout
+        import io
+        from runtime import cli
+        home=Path(tempfile.mkdtemp(prefix='runctl-default-')).resolve();prefix=home/'.rund'
+        c=dict(node='fixture',sharedRoot=str(prefix/'shared'),privateRoot=str(prefix/'local'),python=sys.executable,home=str(home),path=os.environ['PATH'],publishers={'rund-fixture':'fixture'})
+        install(prefix,c,Path(__file__).resolve().parents[1],'a'*40)
+        write(home/'.agentd/local/node.json',{'must':'remain historical'})
+        output=io.StringIO()
+        with patch.object(cli.Path,'home',return_value=home),redirect_stdout(output):
+            self.assertEqual(cli.main(['status']),0)
+        self.assertEqual(json.loads(output.getvalue())['node'],'fixture')
+        self.assertEqual(read(home/'.agentd/local/node.json'),{'must':'remain historical'})
+
+    def test_remote_desired_uses_rund_entry(self):
+        from unittest.mock import patch
+        from runtime import cli
+        document=dict(id='demo',publisher='operator',desired='offline')
+        config=dict(node='target',sharedRoot='fixture',publishers={'operator':'origin'})
+        with patch.object(cli,'get',return_value=(document,None)),patch.object(cli.subprocess,'run',return_value=subprocess.CompletedProcess([],0,json.dumps(document),'')) as run:
+            self.assertEqual(cli.set_desired(config,'demo','offline'),document)
+        self.assertEqual(run.call_args.args[0][-1],'exec "$HOME/.rund/bin/runctl" desired demo offline')
+
     def test_origin_transports_intent_without_a_running_sync_service(self):
         from unittest.mock import patch
         from runtime import cli

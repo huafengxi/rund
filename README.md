@@ -1,6 +1,6 @@
 # rund — 单写者对象与本机 Task 执行
 
-本仓提供声明校验、节点执行、Task 进程监督、Service 策略、对象客户端及普通任务工具。机器、仓地址、工具、目录、同步端点与凭据引用由调用方提供。rund 自身是普通 Service，由外部 bootstrap 启动并监督；命令为 runctl start/stop/status rund，前台入口为 runctl run rund。统一入口 runctl.py，正式合同见 [PROTOCOL.md](PROTOCOL.md)。
+本仓提供声明校验、节点执行、Task 进程监督、Service 策略、对象客户端及普通任务工具。机器、仓地址、工具、目录、同步端点与凭据引用由调用方提供。rund 自身是普通 Service，由外部 bootstrap 启动并监督；命令为 runctl start/stop/status rund，前台入口为 runctl run rund。默认运行根为 ~/.rund，节点配置为 ~/.rund/local/node.json；统一入口 runctl.py，正式合同见 [PROTOCOL.md](PROTOCOL.md)。
 
 runtime/config.py 定义声明；store.py 提供原子持久化；protocol.py 是轻量客户端；engine.py 协调 Service 与 Task；process.py/native.py 处理真实进程身份、wait 与组收口；cli.py 暴露安装节点操作。
 
