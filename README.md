@@ -4,7 +4,7 @@
 
 机制仓位于 ~/.rund/rund，私有配置仓位于 ~/.rund/config。节点配置入口为 config/host-id：每行 hostname node，第一条有效记录指定 hub；node 同时是 SSH 别名。运行路径、Python、工具路径与轮询周期按统一约定推导。新机完成两个 checkout 并登记身份后执行 `~/.rund/rund/runctl start`；独立实例使用 `--root` 指定运行根。完整合同见 [PROTOCOL.md](PROTOCOL.md)。
 
-Service 表达常驻程序并直接拥有进程状态；Task 表达一次性执行。两类声明均为不可变的 declaration-vN.json 完整快照，读取数字版本最高者，修改时追加下一版。Task 执行定义不可变，取消追加新声明，终态状态整份冻结。Service 执行变化须提高 version。rund 不裁决跨节点写冲突，同步层负责运输和冲突处理。
+Service 表达常驻程序并直接拥有进程状态；Task 表达一次性执行。每个对象保存一份 declaration.json。Service 原地更新，配置历史由 Git 保存，执行变化须提高 version。Task 声明不可变，修改或重跑使用新 ID，取消通过独立的 cancel.json 表达，终态状态整份冻结。rund 不裁决跨节点写冲突，同步层负责运输和冲突处理。
 
 runtime/config.py 定义声明合同；services.py 解析 host-id 与配置仓对象；engine.py 协调执行；process.py/native.py 处理原生进程身份、真实 wait 与组收口；cli.py 提供节点与对象操作。共享事实位于 shared，本机日志、锁、源码缓存与应用数据位于 local。
 

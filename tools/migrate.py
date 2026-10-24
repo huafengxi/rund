@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
-"""Convert stopped-node legacy declarations to immutable version files."""
+"""Convert stopped-node declarations to single current files and cancellation requests."""
 import argparse
+import os
 from pathlib import Path
+import re
+import shutil
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from runtime.config import node_config,validate,discover,declaration_revision
+from runtime.config import node_config,validate
 from runtime.store import read,write,write_once,require,lock,directory,digest
 from runtime.admission import execution_digest
 
+VERSIONED=re.compile(r'declaration-v([1-9][0-9]*)\.json')
+
 
 def convert(d):
-    result={k:v for k,v in d.items() if k not in ('publisher','revision')}
+    result={k:v for k,v in d.items() if k not in ('publisher','revision','cancelMode')}
+    if result['kind']=='Task':result['desired']='run'
     return validate(result)
+
+
+def cancel(path,d):
+    if d['kind']=='Task' and d.get('desired')=='cancel':
+        write_once(path.with_name('cancel.json'),{'mode':d.get('cancelMode','terminate')})
 
 
 def migrate(root):
@@ -19,35 +30,47 @@ def migrate(root):
     from runtime.cli import executor_alive
     require(not executor_alive(c),'stop rund before migration')
     fd=lock(private/'locks/runtime.lock')
-    import os
     try:
         files=[]
         for tree in (Path(c['configRoot'])/'objects',Path(c['sharedRoot'])):
-            for p in tree.rglob('declaration.json'):
-                if tree==Path(c['sharedRoot']) and p.relative_to(tree).parts[0] in ('agents','configs','gc','scheduling'):continue
-                d=read(p)
-                if tree==Path(c['sharedRoot']) and d.get('kind')=='Service':continue
-                converted=convert(d);revision=d.get('revision',1)
-                target=p.with_name('declaration-v'+str(revision)+'.json')
-                # Existing versioned history can already include this snapshot.
-                if not any(p.parent.glob('declaration-v*.json')):write_once(target,converted);files.append(str(target))
+            for folder,dirs,names in os.walk(tree):
+                if Path(folder)==tree:dirs[:]=[d for d in dirs if d not in ('agents','configs','gc','scheduling')+ (('services',) if tree==Path(c['sharedRoot']) else ())]
+                versions=sorted((Path(folder)/n for n in names if VERSIONED.fullmatch(n)),key=lambda p:int(VERSIONED.fullmatch(p.name)[1]))
+                target=Path(folder)/'declaration.json'
+                if not target.exists() and not versions:continue
+                current=read(target) if target.exists() else None
+                legacy=current is not None and ('publisher' in current or 'revision' in current or current.get('desired')=='cancel')
+                source=versions[-1] if versions and (current is None or legacy) else target
+                before=read(source)
+                if legacy:
+                    backup=private/'migrations/single-declaration'/('config' if tree==Path(c['configRoot'])/'objects' else 'shared')/target.relative_to(tree)
+                    if not backup.exists():
+                        directory(backup.parent);shutil.copyfile(target,backup)
+                if tree==Path(c['sharedRoot']) and before.get('kind')=='Service':continue
+                converted=convert(before)
+                # Cancel is independent and is published before its immutable definition.
+                cancel(target,before)
+                write(target,converted)
+                if source!=target or before!=converted:files.append(str(target))
+                if tree==Path(c['configRoot'])/'objects':
+                    for p in versions:p.unlink()
         accepted=private/'accepted.json'
         if accepted.exists():
             records=read(accepted)
-            if any('publisher' in x['declaration'] or 'revision' in x['declaration'] for x in records.values()):
-                write_once(private/'migrations/versioned-declarations/accepted.json',records)
-                for entry in records.values():
-                    old=entry['declaration'];entry['declaration']=convert(old)
-                    path=Path(entry['path'])
-                    if path.name=='declaration.json':entry['path']=str(path.with_name('declaration-v'+str(old.get('revision',1))+'.json'))
-                write(accepted,records)
-        # Intent remains valid for the equivalent declaration after metadata removal.
-        for p in (private/'services').glob('*/intent.json'):
-            intent=read(p);record=read(private/'migrations/versioned-declarations/accepted.json') if (private/'migrations/versioned-declarations/accepted.json').exists() else {}
-            before=record.get(p.parent.name,{}).get('declaration')
-            if before and intent['declarationDigest']==digest(before):
-                write(p,dict(intent,declarationDigest=digest(convert(before))))
-        # Grants depend on execution content; migrate them only on the hub.
+            backup=private/'migrations/single-declaration/accepted.json'
+            if not backup.exists():write_once(backup,records)
+            for entry in records.values():
+                before=entry['declaration'];entry['declaration']=convert(before)
+                path=Path(c['sharedRoot'])/entry['path']
+                entry['path']=str(Path(entry['path']).with_name('declaration.json'))
+                if before['kind']=='Task':
+                    cancel(path,before)
+                    write_once(path.with_name('declaration.json'),entry['declaration'])
+                intent=private/'services'/before['id']/'intent.json'
+                if before['kind']=='Service' and intent.exists():
+                    value=read(intent)
+                    if value['declarationDigest']==digest(before):write(intent,dict(value,declarationDigest=digest(entry['declaration'])))
+            write(accepted,records)
         ledger=Path(c['sharedRoot'])/'scheduling/state.json'
         if c['node']==c['hub'] and ledger.exists():
             from runtime.services import objects

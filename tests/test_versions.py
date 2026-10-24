@@ -30,33 +30,62 @@ class Versions(unittest.TestCase):
             self.assertEqual(node_config(self.root)['hub'],'hub')
         with (self.root/'config/host-id').open('a') as f:f.write('third-host other\n')
         with self.assertRaisesRegex(ValueError,'duplicate node'):node_config(self.root)
-    def test_numeric_versions_and_immutable_history(self):
+    def test_single_immutable_task_and_current_service(self):
         root=self.root/'shared';p=publish(root,self.d);before=p.read_bytes()
-        # Full snapshots need not arrive sequentially.
-        publish(root,dict(self.d,desired='cancel'),revision=2)
-        p10=publish(root,dict(self.d,desired='cancel'),revision=10)
-        self.assertEqual(p10.name,'declaration-v10.json')
-        self.assertEqual(discover(root)[0]['demo'][0],p10)
+        self.assertEqual(p.name,'declaration.json')
+        self.assertEqual(publish(root,self.d),p)
+        with self.assertRaises(ValueError):publish(root,dict(self.d,argv=['/bin/false']))
         self.assertEqual(p.read_bytes(),before)
-        with self.assertRaises(ValueError):publish(root,dict(self.d,desired='run'),revision=10)
-        self.assertEqual(publish(root,dict(self.d,desired='cancel')),p10)
-    def test_cancel_from_any_node_appends_without_routing(self):
-        root=self.root/'shared';p=publish(root,self.d)
+        service=dict(kind='Service',id='service',node='hub',argv=['/bin/true'],version=1,desired='offline',restart='manual')
+        sp=publish(root,service)
+        publish(root,dict(service,version=2,argv=['/bin/false']))
+        self.assertEqual(read(sp)['version'],2)
+        self.assertEqual(list(sp.parent.glob('declaration*.json')),[sp])
+    def test_shared_service_history_does_not_block_task_publication(self):
+        root=self.root/'shared'
+        write(root/'services/old/declaration.json',{'kind':'Service','obsolete':'history'})
+        p=publish(root,self.d)
+        from runtime.protocol import objects
+        self.assertEqual(objects(root)['demo'][0],p)
+        self.assertEqual(set(objects(root)),{'demo'})
+
+    def test_cancel_from_any_node_is_separate_and_irreversible(self):
+        root=self.root/'shared';p=publish(root,self.d);before=p.read_bytes()
         desired(root,'demo','cancel',mode='kill')
-        self.assertEqual(read(p),self.d)
-        self.assertEqual(read(p.with_name('declaration-v2.json'))['desired'],'cancel')
-    def test_migration_preserves_legacy_bytes_and_terminal_state(self):
-        folder=self.root/'shared/tasks/demo';legacy=dict(self.d,publisher='operator',revision=4)
-        write(folder/'declaration.json',legacy)
+        self.assertEqual(p.read_bytes(),before)
+        self.assertEqual(read(p.with_name('cancel.json')),{'mode':'kill'})
+        self.assertEqual(desired(root,'demo','cancel',mode='terminate')['cancelMode'],'kill')
+        with self.assertRaises(ValueError):desired(root,'demo','run')
+        # A repeated original declaration cannot erase a cancellation request.
+        publish(root,self.d)
+        self.assertTrue(p.with_name('cancel.json').exists())
+    def test_migration_preserves_history_and_terminal_state(self):
+        folder=self.root/'shared/tasks/demo'
+        write(folder/'declaration.json',dict(self.d,publisher='operator',revision=1))
+        write(folder/'declaration-v1.json',self.d)
+        latest=dict(self.d,desired='cancel',cancelMode='kill')
+        write(folder/'declaration-v10.json',latest)
         terminal=dict(kind='Task',id='demo',node='hub',phase='succeeded',waitObserved=True,exitCode=0)
         write(folder/'state.json',terminal)
-        write(self.root/'local/accepted.json',{'demo':dict(path='tasks/demo/declaration.json',declaration=legacy)})
-        before=(folder/'state.json').read_bytes();original=(folder/'declaration.json').read_bytes()
+        write(self.root/'local/accepted.json',{'demo':dict(path='tasks/demo/declaration-v1.json',declaration=self.d)})
+        before=(folder/'state.json').read_bytes();original=(folder/'declaration-v10.json').read_bytes()
         migrate(self.root);migrate(self.root)
         self.assertEqual((folder/'state.json').read_bytes(),before)
-        self.assertEqual((folder/'declaration.json').read_bytes(),original)
-        self.assertEqual(read(folder/'declaration-v4.json'),self.d)
-        self.assertEqual(read(self.root/'local/accepted.json')['demo']['path'],'tasks/demo/declaration-v4.json')
+        self.assertEqual((folder/'declaration-v10.json').read_bytes(),original)
+        self.assertEqual(read(folder/'declaration.json'),self.d)
+        self.assertEqual(read(folder/'cancel.json'),{'mode':'kill'})
+        self.assertEqual(read(self.root/'local/accepted.json')['demo']['path'],'tasks/demo/declaration.json')
+    def test_migration_collapses_checkout_versions_and_preserves_new_current(self):
+        folder=self.root/'config/objects/services/service'
+        d=dict(kind='Service',id='service',node='hub',argv=['/bin/true'],version=1,desired='offline',restart='manual')
+        write(folder/'declaration-v1.json',d)
+        write(folder/'declaration-v12.json',dict(d,version=2))
+        migrate(self.root)
+        self.assertEqual(read(folder/'declaration.json')['version'],2)
+        self.assertFalse(list(folder.glob('declaration-v*.json')))
+        write(folder/'declaration.json',dict(d,version=3))
+        migrate(self.root)
+        self.assertEqual(read(folder/'declaration.json')['version'],3)
     def test_sync_uses_hub_and_conventional_transport_paths(self):
         argv,env=command(self.root,'once')
         self.assertIn('hub:'+str(self.root/'hub/shared'),argv)

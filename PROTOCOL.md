@@ -6,17 +6,17 @@ rund 是直接运行的节点底座。Service 表达持续运行意图并直接�
 
 运行根默认为 ~/.rund，通过 `--root` 可指定独立实例。机制源码直接运行 rund/ Git checkout；私有配置仓位于 config/。config/host-id 每行 hostname node，忽略空行与 # 注释，第一条有效记录为 hub。hostname 不区分大小写，hostname 和 node 均唯一，未知本机 hostname 报错。node 同时作为 SSH 别名。
 
-两类对象均保存不可变的 declaration-vN.json，N 为正整数且无前导零。每版是完整声明，读数字版本最高者，允许版本间有空缺。相同版本只能具有相同内容；本地发布不会覆盖已有版本。多节点并发产生的同版本冲突留给同步层处理。
+每个对象保存一份 declaration.json。Service 配置原地更新，历史由配置仓 Git 保存；Task 声明发布后不可改变，相同内容重复发布幂等。同 ID Task 必须具有相同内容。多节点写冲突由同步层处理。
 
 Service 声明位于 config/objects/services/<id>/；静态 Task 位于 config/objects/tasks/<id>/；动态 Task 位于 shared/tasks/<id>/。路径组织文件，正文 kind/id 定义身份。配置附件位于 config/objects/configs/。
 
-静态 Task 在目标节点执行前按同一版本号保存共享快照；取消在共享目录追加新版本。配置仓与共享树的同 ID Task 按数字版本合并，同版本内容须一致。Service 直接读取配置仓。共享树中的 Service 声明仅供历史保留。
+静态 Task 在目标节点执行前保存不可变的共享快照；配置仓与共享树的同 ID Task 内容必须一致。取消请求保存到共享 Task 目录的 cancel.json，与声明分别读取。Service 直接读取配置仓；shared/services 仅提供执行状态。
 
 各节点可以发布 Task 与取消意图。node 表示唯一执行位置，目标节点写 shared/services/<id>/state.json 或 shared/tasks/<id>/state.json。id 全局唯一，kind、id 和 node 在对象创建后不可改变。Task 终态整份冻结。shared 与 local 不相交；锁、日志、凭据、源码缓存、工作目录和应用私有数据位于 local。
 
 ## 声明
 
-公共必需字段为 kind、id、node，可选 name 为显示名和本机 Service 选择名称。声明修订号仅由文件名表达。
+公共必需字段为 kind、id、node，可选 name 为显示名和本机 Service 选择名称。声明文件名固定为 declaration.json。
 
 | 字段 | 合同 |
 | --- | --- |
@@ -30,9 +30,9 @@ Service 声明位于 config/objects/services/<id>/；静态 Task 位于 config/o
 | env | 可选字符串映射，覆盖基础环境 |
 | resources | 可选全局资源数组；省略时独立执行，空数组仍占并发名额 |
 
-Task 的 desired 为 run/cancel；cancelMode 为 terminate/kill，默认 terminate。除 desired、cancelMode 外，发布后的执行定义不可改变。取消不可撤回，再次取消不改变模式。重新执行或修改执行定义须使用新 ID。
+Task 的 desired 固定为 run。声明全部字段不可变，重新执行或修改执行定义须使用新 ID。取消请求为独立的 cancel.json：`{"mode":"terminate"}` 或 `{"mode":"kill"}`，默认 terminate。请求不可撤回；重复取消沿用已观察到的请求模式，重新发布原声明不清除取消。多节点同时产生不同模式的冲突由同步层处理。
 
-Service 额外必需 version、desired、restart，可选 probe。version 为执行版本，与文件名中的声明修订号独立。
+Service 额外必需 version、desired、restart，可选 probe。version 为执行版本。
 
 | Service 字段 | 合同 |
 | --- | --- |
@@ -97,7 +97,7 @@ status 的 actual、run_version、state、drift 为派生健康视图，检查�
 
 启动直接读取 host-id，创建运行目录、单实例锁和自身进程记录，进入协调循环。rund 是节点程序，系统开机入口由调用方选择。start 返回只说明节点已启动，业务就绪独立查询 status。同步、scheduler 和源码准备按普通声明执行。
 
-启动前须具备 conda Python、Git，以及声明引用的工具与凭据。运行过程直接使用源码 checkout。已有节点先停止 rund，再用 tools/migrate.py 转换旧声明与本机接受记录；历史声明、日志、终态状态和业务数据保留。
+启动前须具备 conda Python、Git，以及声明引用的工具与凭据。运行过程直接使用源码 checkout。已有节点先全部停止 rund，再用 tools/migrate.py 将数字版本收为当前声明、拆出取消请求并转换本机接受记录。配置仓旧版本由 Git 保存，共享树版本文件保留；被替换的旧单文件声明归档到 local/migrations/single-declaration。日志、终态状态和业务数据保留。
 
 ## 统一入口
 
@@ -110,9 +110,9 @@ status 的 actual、run_version、state、drift 为派生健康视图，检查�
 | status <Service name/id> | 本节点 Service 期望与实际状态 |
 | status <Task id> | Task 声明与状态 |
 | start / stop <Service name/id> | 保存本机 Service 启停意图，等待约 120 秒内收敛 |
-| cancel <Task id> [--mode terminate\|kill] | 本地追加取消版本，不等待终态 |
-| publish --input <file\|-> | 发布完整声明，自动分配下一个数字版本，相同内容幂等 |
-| desired <id> <value> [--mode terminate\|kill] | Task 追加意图版本；Service 到执行节点保存本机启停意图 |
+| cancel <Task id> [--mode terminate\|kill] | 本地发布不可变取消请求，不等待终态 |
+| publish --input <file\|-> | 发布完整声明；Service 原地更新，Task 相同内容幂等 |
+| desired <id> <value> [--mode terminate\|kill] | Task 发布取消请求，run 仅在未取消时幂等；Service 到执行节点保存本机启停意图 |
 | sync | 按约定执行一次共享树同步 |
 
 客户端不直接 spawn/kill 受管负载或回写执行状态。节点停止前已有 Task 须先执行完或取消。服务操作超时表示意图已记录；status 不主动同步。

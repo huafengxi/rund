@@ -9,7 +9,7 @@ import sys
 import time
 from .config import node_config,FINAL
 from .store import read,require,lock,directory
-from .protocol import desired,publish
+from .protocol import desired,publish,cancellation
 from .process import identity,same,alive,expand
 from . import services
 
@@ -105,8 +105,7 @@ def set_desired(c,identifier,value,mode=None):
     from .protocol import objects as shared_objects
     if identifier not in shared_objects(c['sharedRoot']):
         p,_=services.objects(c)[identifier]
-        from .config import declaration_revision
-        publish(c['sharedRoot'],d,revision=declaration_revision(p))
+        publish(c['sharedRoot'],d)
     return desired(c['sharedRoot'],identifier,value,mode=mode)
 
 
@@ -169,7 +168,7 @@ def main(argv=None,default_root=None):
                 rows=[s for s in result['services'] if a.selector in (s['name'],s['id'])]
                 if rows:require(len(rows)==1,'service selector not unique');result=rows[0]
                 else:
-                    d,state=services.get(c,a.selector);require(d['kind']=='Task','selector not found');result=dict(declaration=d,state=state)
+                    d,state=services.get(c,a.selector);require(d['kind']=='Task','selector not found');result=dict(declaration=d,state=state,cancellation=cancellation(services.objects(c)[d['id']][0]))
             print(json.dumps(result))
         elif a.action in ('start','stop'):
             print(json.dumps(service(c,a.selector,a.action,a.root) if a.selector else node_action(c,a.root,a.action)))

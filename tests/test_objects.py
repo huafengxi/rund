@@ -66,9 +66,10 @@ class Objects(unittest.TestCase):
     def test_task_immutable_execution(self):
         d=self.task();self.put(d)
         with self.assertRaises(ValueError):self.put(dict(d,argv=['bad']))
-        with self.assertRaises(ValueError):publish(self.c['sharedRoot'],dict(d,desired='cancel'),revision=1)
-        d=dict(d,desired='cancel');self.put(d)
-        with self.assertRaises(ValueError):self.put(dict(d,desired='run'))
+        with self.assertRaises(ValueError):self.put(dict(d,desired='cancel'))
+        desired(self.c['sharedRoot'],'task','cancel')
+        self.assertEqual(get(self.c['sharedRoot'],'task')[0],d)
+        with self.assertRaises(ValueError):desired(self.c['sharedRoot'],'task','run')
     def test_service_restart_has_direct_process_and_no_child_task(self):
         d=dict(kind='Service',id='svc',node='a',version=1,desired='online',restart='always',argv=[sys.executable,'-c','pass'])
         self.put(d);first=self.until(lambda:self.state('svc') and self.state('svc').get('runId'))
@@ -85,16 +86,16 @@ class Objects(unittest.TestCase):
         first=self.state('svc')['runId'];set_intent(self.c,d,'offline');self.until(lambda:self.state('svc')['phase']=='stopped')
         set_intent(self.c,d,'online');self.until(lambda:self.state('svc')['phase']=='running' and self.state('svc')['runId']!=first)
     def test_kind_not_path(self):
-        self.put(self.task(),self.base/'shared/anything/else/declaration-v1.json');self.until(lambda:self.state('task') and self.state('task')['phase']=='succeeded')
+        self.put(self.task(),self.base/'shared/anything/else/declaration.json');self.until(lambda:self.state('task') and self.state('task')['phase']=='succeeded')
     def test_duplicate_identity_blocks(self):
-        d=self.task();self.put(d);write(self.base/'shared/elsewhere/declaration-v1.json',d);self.o.round();self.assertTrue(self.o.errors)
+        d=self.task();self.put(d);write(self.base/'shared/elsewhere/declaration.json',d);self.o.round();self.assertTrue(self.o.errors)
     def test_second_executor_refused(self):
         with self.assertRaises(BlockingIOError):Engine(self.c)
     def test_unknown_executor_restart_does_not_spawn(self):
         p=self.put(self.task());s=self.o.initial(self.task());s.update(phase='starting',updatedAt='2020-01-01T00:00:00+00:00');write(p.with_name('state.json'),s)
         self.o.round();self.assertEqual(self.state('task')['phase'],'unknown');self.assertFalse(self.o.processes.handles)
     def test_shared_business_files_are_not_execution_objects(self):
-        write(self.base/'shared/agents/task/demo/declaration-v1.json',{'business':'opaque'})
+        write(self.base/'shared/agents/task/demo/declaration.json',{'business':'opaque'})
         self.put(self.task());self.until(lambda:self.state('task') and self.state('task')['phase']=='succeeded')
         self.assertFalse(self.o.errors)
     def test_credentials_wrapper_redacts_and_execs(self):

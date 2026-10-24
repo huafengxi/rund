@@ -50,7 +50,7 @@ def lock(p):
 
 
 def write_once(p,value):
-    """Publish complete immutable bytes without replacing an existing version."""
+    """Publish complete immutable bytes without replacing an existing file."""
     p=Path(p);directory(p.parent);data=canonical(value)
     t=p.with_name('.write-'+uuid.uuid4().hex)
     try:
@@ -58,7 +58,7 @@ def write_once(p,value):
             os.fchown(f.fileno(),-1,os.getgid());f.write(data);f.flush();os.fsync(f.fileno())
         t.chmod(0o600)
         try:os.link(t,p)
-        except FileExistsError:require(read(p)==value,'declaration version content conflict: '+str(p))
+        except FileExistsError:require(read(p)==value,'immutable file content conflict: '+str(p))
     finally:
         t.unlink(missing_ok=True)
     fd=os.open(p.parent,os.O_RDONLY)

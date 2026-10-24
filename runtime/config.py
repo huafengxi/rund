@@ -31,9 +31,8 @@ def validate(d):
     for k in ('id','node'):name(d[k])
     if 'name' in d:text(d['name'])
     if d['kind']=='Task':
-        require(set(d)<=COMMON|EXEC_KEYS|{'desired','cancelMode','service'},'unknown Task fields')
-        require(d.get('desired') in ('run','cancel'),'Task desired must be run/cancel')
-        require(d.get('cancelMode','terminate') in ('terminate','kill'),'invalid cancel mode')
+        require(set(d)<=COMMON|EXEC_KEYS|{'desired','service'},'unknown Task fields')
+        require(d.get('desired')=='run','Task desired must be run; cancel through cancel.json')
         execution({k:v for k,v in d.items() if k in EXEC_KEYS})
         if 'service' in d:
             s=d['service'];require(isinstance(s,dict) and set(s)=={'id','version','declarationDigest'},'invalid Service reference');name(s['id'])
@@ -58,10 +57,7 @@ def changed(before,after):
     validate(after)
     require(all(before[k]==after[k] for k in ('kind','id','node')),'object identity/target cannot change')
     if after['kind']=='Task':
-        a={k:v for k,v in after.items() if k not in ('desired','cancelMode')}
-        b={k:v for k,v in before.items() if k not in ('desired','cancelMode')}
-        require(a==b,'Task execution is immutable')
-        require(before['desired']!='cancel' or after==before,'Task cancellation is irreversible')
+        require(before==after,'Task execution is immutable')
     else:
         require(after['version']>=before['version'],'Service version rollback')
         keys=tuple(EXEC_KEYS)+('restart','probe')
@@ -73,50 +69,33 @@ def node_config(root=None):
     return resolve_config(Path(root or Path.home()/'.rund').expanduser().resolve())
 
 
-DECLARATION=re.compile(r'declaration-v([1-9][0-9]*)\.json')
-
-def declaration_revision(path):
-    match=DECLARATION.fullmatch(Path(path).name)
-    require(match is not None,'versioned declaration filename required')
-    return int(match[1])
-
-
-def discover(root):
+def discover(root,*,exclude=()):
     result={};errors=[]
     for folder,dirs,files in os.walk(root):
-        if Path(folder)==Path(root):dirs[:]=[d for d in dirs if d not in ('agents','configs','gc','scheduling')]
-        paths=sorted((Path(folder)/f for f in files if DECLARATION.fullmatch(f)),key=declaration_revision)
-        prior=None
+        if Path(folder)==Path(root):dirs[:]=[d for d in dirs if d not in ('agents','configs','gc','scheduling')+tuple(exclude)]
+        if 'declaration.json' not in files:continue
+        path=Path(folder)/'declaration.json'
         try:
-            for path in paths:
-                d=validate(read(path))
-                if prior is not None:changed(prior,d)
-                prior=d
-            if paths:
-                require(prior['id'] not in result,'duplicate object identity: '+prior['id'])
-                result[prior['id']]=(paths[-1],prior)
+            d=validate(read(path))
+            require(d['id'] not in result,'duplicate object identity: '+d['id'])
+            result[d['id']]=(path,d)
         except (ValueError,OSError,KeyError,TypeError) as e:errors.append(str(folder)+': '+str(e))
     return result,errors
 
 
-def publish(root,d,*,path=None,revision=None):
-    from .store import write_once
+def publish(root,d,*,path=None):
+    from .store import write,write_once
     validate(d)
-    found,errors=discover(root);require(not errors,'; '.join(errors))
+    found,errors=discover(root,exclude=('services',) if d['kind']=='Task' else ());require(not errors,'; '.join(errors))
     prior=found.get(d['id'])
     if prior:
         old,previous=prior
-        if previous==d and path is None and revision is None:return old
         changed(previous,d)
-        number=declaration_revision(old)+1 if revision is None else revision
-        require(number>=declaration_revision(old),'declaration revision rollback')
-        folder=old.parent
+        require(path is None or Path(path)==old,'object already published at another path')
+        p=old
     else:
-        number=1 if revision is None else revision
         folder=Path(root)/('services' if d['kind']=='Service' else 'tasks')/d['id']
-    require(type(number) is int and number>0,'positive declaration revision required')
-    p=Path(path) if path else folder/('declaration-v'+str(number)+'.json')
-    require(declaration_revision(p)==number,'declaration filename revision mismatch')
-    if prior and number==declaration_revision(prior[0]):require(previous==d,'declaration version content conflict')
-    write_once(p,d)
+        p=Path(path) if path else folder/'declaration.json'
+    require(p.name=='declaration.json','declaration.json filename required')
+    (write_once if d['kind']=='Task' else write)(p,d)
     return p

@@ -5,10 +5,11 @@ from pathlib import Path
 import signal
 import time
 import uuid
-from .config import FINAL,changed,publish,declaration_revision
+from .config import FINAL,changed,publish
 from .process import Processes,expand
 from .store import digest,directory,lock,now,read,require,write
 from .admission import admitted
+from .protocol import cancellation
 from . import services
 
 class Engine:
@@ -47,11 +48,9 @@ class Engine:
             try:
                 if 'nodes' in self.c:require(d['node'] in self.c['nodes'],'unknown execution node')
                 if d['kind']=='Task' and not p.exists():
-                    publish(self.root,d,revision=declaration_revision(p))
+                    publish(self.root,d)
                 if tid in self.accepted:
                     previous=self.accepted[tid]
-                    require(declaration_revision(p)>=declaration_revision(previous['path']),'declaration revision rollback')
-                    if declaration_revision(p)==declaration_revision(previous['path']):require(previous['declaration']==d,'declaration version content conflict')
                     changed(previous['declaration'],d)
                 self.accepted[tid]=dict(path=str(p.relative_to(self.root)),declaration=d)
             except (OSError,ValueError,KeyError,TypeError) as e:self.errors.append(tid+': '+str(e))
@@ -70,9 +69,10 @@ class Engine:
         s=self.state(p) or self.initial(d)
         if s['phase'] in FINAL:return
         require(s['node']==self.c['node'] and s['id']==d['id'],'foreign execution state')
+        cancel=cancellation(p)
         s['declarationDigest']=digest(d)
         if s['phase'] in ('accepted','preparing','queued'):
-            if d['desired']=='cancel':self.save(p,s,phase='canceled',finishedAt=now(),reason='canceled before spawn');return
+            if cancel is not None:self.save(p,s,phase='canceled',finishedAt=now(),reason='canceled before spawn');return
             if self.paused:return
             missing=[f for f in d.get('needs',[]) if not Path(expand(f,self.c,d['id'])).is_file()]
             if missing:self.save(p,s,phase='preparing',reason='missing files: '+', '.join(missing));return
@@ -93,8 +93,8 @@ class Engine:
             self.save(p,s,phase=phase,finishedAt=now(),exitCode=rc if rc>=0 else None,signal=-rc if rc<0 else None,waitObserved=True,reason=None);return
         if fact['status']=='unknown':
             self.save(p,s,phase='unknown',reason=fact.get('reason'));return
-        if d['desired']=='cancel':
-            step=s.get('stopStep',0);kill=d.get('cancelMode')=='kill' or step==1 and time.time()>=s.get('stopDeadline',0)
+        if cancel is not None:
+            step=s.get('stopStep',0);kill=cancel['mode']=='kill' or step==1 and time.time()>=s.get('stopDeadline',0)
             if step==0 or step==1 and kill:
                 try:
                     self.processes.signal(s['process'],kill)

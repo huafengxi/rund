@@ -86,6 +86,16 @@ class Scheduling(unittest.TestCase):
         self.rounds()
         self.assertEqual(self.state('waiting')['phase'],'running')
 
+    def test_cancel_queued_task_does_not_take_a_grant(self):
+        self.put('canceled','a',[])
+        for engine in self.engines:engine.round()
+        desired(self.root,'canceled','cancel')
+        self.scheduler.round()
+        self.assertNotIn('canceled',read(admission_path(self.engines[0].c))['grants'])
+        self.rounds()
+        self.assertEqual(self.state('canceled')['phase'],'canceled')
+        self.assertFalse(self.engines[0].processes.handles)
+
     def test_scheduler_origin_and_single_writer_lock(self):
         with self.assertRaises((OSError,ValueError)):Scheduler(self.base/'a')
         with self.assertRaises(ValueError):Scheduler(self.base/'b')

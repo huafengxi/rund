@@ -24,7 +24,7 @@ class CLI(unittest.TestCase):
         (self.repo/'host-id').write_text(socket.gethostname()+' fixture\n')
         self.declaration=dict(kind='Service',id='demo',name='demo',node='fixture',version=1,
                               desired='online',restart='always',argv=[sys.executable,'-c','import time;time.sleep(100)'])
-        self.path=self.repo/'objects/services/demo/declaration-v1.json';write(self.path,self.declaration)
+        self.path=self.repo/'objects/services/demo/declaration.json';write(self.path,self.declaration)
         self.c=node_config(self.config)
     def call(self,*args,check=True):
         p=subprocess.run([sys.executable,'-B',str(SOURCE/'runctl'),'--root',str(self.config),*args],capture_output=True,text=True,timeout=20)
@@ -52,7 +52,7 @@ class CLI(unittest.TestCase):
         self.assertEqual(frozen,read(self.base/'local/services/demo/runs'/first['run']/'state.json'))
     def test_config_revision_restarts_direct_process_and_resets_intent(self):
         self.call('start');self.until(lambda:self.call('status','demo')['actual']=='online');first=self.call('status','demo')
-        self.call('stop','demo');write(self.path.with_name('declaration-v2.json'),dict(self.declaration,version=2,env={'EXAMPLE':'2'}))
+        self.call('stop','demo');write(self.path,dict(self.declaration,version=2,env={'EXAMPLE':'2'}))
         self.until(lambda:self.call('status','demo')['actual']=='online')
         self.assertEqual(self.call('status','demo')['run_version'],2);self.assertNotEqual(first['pid'],self.call('status','demo')['pid'])
     def test_unknown_hostname_and_duplicate_mapping_fail(self):
@@ -71,7 +71,7 @@ class CLI(unittest.TestCase):
     def test_static_task_cancellation_uses_protocol_and_freezes(self):
         d=dict(kind='Task',id='static-task',node='fixture',desired='run',
                argv=[sys.executable,'-c','raise SystemExit(99)'],needs=[str(self.base/'missing')])
-        source=self.repo/'objects/tasks/static-task/declaration-v1.json';write(source,d);before=source.read_bytes()
+        source=self.repo/'objects/tasks/static-task/declaration.json';write(source,d);before=source.read_bytes()
         self.call('start');self.until(lambda:(get(self.c,'static-task')[1] or {}).get('phase')=='preparing')
         self.call('cancel','static-task');self.until(lambda:get(self.c,'static-task')[1]['phase']=='canceled')
         self.assertEqual(before,source.read_bytes());state=get(self.c,'static-task')[1]

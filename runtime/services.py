@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 import socket
 import subprocess
-from .config import discover,changed,declaration_revision
+from .config import discover
 from .store import read,write,require,digest
 
 
@@ -77,21 +77,17 @@ def publish(c,d):
 
 
 def objects(c):
-    """Merge immutable checkout Task versions with shared snapshots/updates."""
-    shared,errors=discover(c['sharedRoot'])
+    """Combine current checkout declarations with immutable shared Task snapshots."""
+    shared,errors=discover(c['sharedRoot'],exclude=('services',))
     result={i:(p,d) for i,(p,d) in shared.items() if d['kind']=='Task'}
     if c.get('configRoot'):
         source,issues=discover(Path(c['configRoot'])/'objects');errors.extend(issues)
         for i,(source_path,d) in source.items():
             if i in result:
-                other_path,other=result[i]
-                left,right=declaration_revision(source_path),declaration_revision(other_path)
-                if left==right:require(d==other,'declaration version content conflict: '+i)
-                elif left<right:changed(d,other)
-                else:changed(other,d)
-                if left<=right:continue
+                require(d==result[i][1],'Task execution is immutable: '+i)
+                continue
             folder='services' if d['kind']=='Service' else 'tasks'
-            result[i]=(Path(c['sharedRoot'])/folder/i/source_path.name,d)
+            result[i]=(Path(c['sharedRoot'])/folder/i/'declaration.json',d)
     require(not errors,'; '.join(errors))
     return result
 

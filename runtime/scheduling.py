@@ -4,6 +4,7 @@ import signal
 import time
 from pathlib import Path
 from .config import FINAL, node_config
+from .protocol import cancellation
 from .services import objects,wanted
 from .store import read, write, now, require, lock
 from .admission import admission_path, execution_digest
@@ -36,7 +37,7 @@ def reconcile(c, policy):
             held.update(d.get('resources', []))
     queue = []
     for tid, (p, d) in found.items():
-        if 'resources' not in d or tid in grants or d['kind']=='Task' and d['desired']!='run':
+        if 'resources' not in d or tid in grants or d['kind']=='Task' and cancellation(p) is not None:
             continue
         sp = p.with_name('state.json')
         s = read(sp) if sp.exists() else None
