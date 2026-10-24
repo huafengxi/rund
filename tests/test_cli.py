@@ -22,7 +22,7 @@ class CLI(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(prefix='rund-direct-');self.base=Path(self.temp.name)
         self.repo=self.base/'config';self.repo.mkdir();self.config=self.base
         (self.repo/'host-id').write_text(socket.gethostname()+' fixture\n')
-        self.declaration=dict(kind='Service',id='demo',name='demo',node='fixture',version=1,
+        self.declaration=dict(kind='Service',id='demo',name='demo',node='fixture',
                               desired='online',restart='always',argv=[sys.executable,'-c','import time;time.sleep(100)'])
         self.path=self.repo/'objects/services/demo/declaration.json';write(self.path,self.declaration)
         self.c=node_config(self.config)
@@ -52,9 +52,9 @@ class CLI(unittest.TestCase):
         self.assertEqual(frozen,read(self.base/'local/services/demo/runs'/first['run']/'state.json'))
     def test_config_revision_restarts_direct_process_and_resets_intent(self):
         self.call('start');self.until(lambda:self.call('status','demo')['actual']=='online');first=self.call('status','demo')
-        self.call('stop','demo');write(self.path,dict(self.declaration,version=2,env={'EXAMPLE':'2'}))
+        self.call('stop','demo');write(self.path,dict(self.declaration,env={'EXAMPLE':'2'}))
         self.until(lambda:self.call('status','demo')['actual']=='online')
-        self.assertEqual(self.call('status','demo')['run_version'],2);self.assertNotEqual(first['pid'],self.call('status','demo')['pid'])
+        self.assertEqual(self.call('status','demo')['runDeclarationDigest'],self.call('status','demo')['declarationDigest']);self.assertNotEqual(first['pid'],self.call('status','demo')['pid'])
     def test_unknown_hostname_and_duplicate_mapping_fail(self):
         with patch('socket.gethostname',return_value='missing'):
             with self.assertRaisesRegex(ValueError,'hostname not registered'):node_config(self.config)

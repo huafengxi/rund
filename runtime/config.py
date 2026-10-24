@@ -37,8 +37,11 @@ def validate(d):
         if 'service' in d:
             s=d['service'];require(isinstance(s,dict) and set(s)=={'id','version','declarationDigest'},'invalid Service reference');name(s['id'])
     elif d['kind']=='Service':
-        require(set(d)<=COMMON|EXEC_KEYS|{'version','desired','restart','probe'},'unknown Service fields')
-        require(type(d.get('version')) is int and d['version']>0,'positive Service version required')
+        require(set(d)<=COMMON|EXEC_KEYS|{'repos','desired','restart','probe'},'unknown Service fields')
+        require(isinstance(d.get('repos',{}),dict),'repos must map repository names to tags')
+        for repo,tag in d.get('repos',{}).items():
+            name(repo);text(tag)
+            require(not tag.startswith('-') and not any(x in tag for x in ('..','~','^',':','?','*','[','\\','@{')) and not any(c.isspace() for c in tag),'invalid Git tag')
         require(d.get('desired') in ('online','offline'),'Service desired must be online/offline')
         require(d.get('restart') in ('manual','on-failure','always'),'invalid restart policy')
         execution({k:v for k,v in d.items() if k in EXEC_KEYS})
@@ -58,10 +61,6 @@ def changed(before,after):
     require(all(before[k]==after[k] for k in ('kind','id','node')),'object identity/target cannot change')
     if after['kind']=='Task':
         require(before==after,'Task execution is immutable')
-    else:
-        require(after['version']>=before['version'],'Service version rollback')
-        keys=tuple(EXEC_KEYS)+('restart','probe')
-        require(all(before.get(k)==after.get(k) for k in keys) or after['version']>before['version'],'changed execution requires higher Service version')
 
 
 def node_config(root=None):

@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from .config import node_config,FINAL
-from .store import read,require,lock,directory
+from .store import read,require,lock,directory,digest
 from .protocol import desired,publish,cancellation
 from .process import identity,same,alive,expand
 from . import services
@@ -53,9 +53,9 @@ def status(c):
         if actual=='online':
             ok,note=probe(d,c)
             if not ok:actual='offline'
-        version=s.get('runVersion') if s else None;wanted=services.wanted(c,d)
-        drift=actual!=wanted or actual=='online' and version!=d['version']
-        rows.append(dict(id=identifier,name=d.get('name',identifier),version=d['version'],run_version=version,desired=wanted,
+        run_digest=s.get('declarationDigest') if s and s.get('runId') else None;wanted=services.wanted(c,d)
+        drift=actual!=wanted or actual=='online' and run_digest!=digest(d)
+        rows.append(dict(id=identifier,name=d.get('name',identifier),declarationDigest=digest(d),runDeclarationDigest=run_digest,desired=wanted,
                          actual=actual,state='DRIFT' if drift else 'ok',pid=pid,run=s.get('runId') if s else None,note=note))
     health=Path(c['privateRoot'])/'runtime.json';record=read(health) if health.exists() else {}
     diagnostics.extend(record.get('diagnostics',[]))

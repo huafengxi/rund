@@ -17,6 +17,7 @@ VERSIONED=re.compile(r'declaration-v([1-9][0-9]*)\.json')
 def convert(d):
     result={k:v for k,v in d.items() if k not in ('publisher','revision','cancelMode')}
     if result['kind']=='Task':result['desired']='run'
+    else:result.pop('version',None)
     return validate(result)
 
 
@@ -54,6 +55,8 @@ def migrate(root):
                 if source!=target or before!=converted:files.append(str(target))
                 if tree==Path(c['configRoot'])/'objects':
                     for p in versions:p.unlink()
+        from runtime.services import declarations
+        current,_=declarations(c)
         accepted=private/'accepted.json'
         if accepted.exists():
             records=read(accepted)
@@ -69,15 +72,24 @@ def migrate(root):
                 intent=private/'services'/before['id']/'intent.json'
                 if before['kind']=='Service' and intent.exists():
                     value=read(intent)
-                    if value['declarationDigest']==digest(before):write(intent,dict(value,declarationDigest=digest(entry['declaration'])))
+                    if value['declarationDigest']==digest(before):write(intent,dict(value,declarationDigest=digest(current.get(before['id'],(None,entry['declaration']))[1])))
             write(accepted,records)
+        # Only the hub owns grant publication; old central bytes remain historical.
         ledger=Path(c['sharedRoot'])/'scheduling/state.json'
-        if c['node']==c['hub'] and ledger.exists():
+        marker=private/'migrations/object-grants.json'
+        if c['node']==c['hub'] and ledger.exists() and not marker.exists():
             from runtime.services import objects
+            from runtime.admission import admission_path
             state=read(ledger);found=objects(c)
             for tid in state['grants']:
-                if tid in found:state['grants'][tid]=execution_digest(found[tid][1])
-            write(ledger,state)
+                require(tid in found,'missing declaration for legacy grant: '+tid)
+                _,d=found[tid]
+                write(admission_path(c,d),dict(node=c['hub'],id=tid,active=True,executionDigest=execution_digest(d),resources=d.get('resources',[]),updatedAt=state.get('updatedAt')))
+            write_once(marker,state)
+        for p in (Path(c['sharedRoot'])/'services').glob('*/state.json'):
+            state=read(p)
+            if state.get('node')==c['node'] and 'runVersion' in state:
+                del state['runVersion'];write(p,state)
         return files
     finally:os.close(fd)
 

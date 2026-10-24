@@ -9,7 +9,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from runtime.config import publish
 from runtime.engine import Engine
 from runtime.protocol import get,desired
-from runtime.admission import admission_path
+from runtime.admission import admission_path,grants as active_grants
 from runtime.scheduling import Scheduler
 from runtime.store import read,write
 
@@ -67,7 +67,7 @@ class Scheduling(unittest.TestCase):
         self.assertEqual(self.state('one')['phase'],'running');self.assertEqual(self.state('two')['phase'],'running')
         self.put('three','b',[]);self.rounds()
         self.assertEqual(self.state('three')['phase'],'queued')
-        grants=read(admission_path(self.engines[0].c))['grants']
+        grants=active_grants(self.engines[0].c)
         self.assertEqual(set(grants),{'one','two'})
         # Lose wait authority without terminating the process: it must retain its slot.
         handle=self.engines[0].processes.handles.pop('one')
@@ -82,7 +82,7 @@ class Scheduling(unittest.TestCase):
         for _ in range(4):
             for engine in self.engines:engine.round()
         self.assertEqual(self.state('waiting')['phase'],'queued')
-        self.assertFalse(admission_path(self.engines[0].c).exists())
+        self.assertFalse(active_grants(self.engines[0].c))
         self.rounds()
         self.assertEqual(self.state('waiting')['phase'],'running')
 
@@ -91,7 +91,7 @@ class Scheduling(unittest.TestCase):
         for engine in self.engines:engine.round()
         desired(self.root,'canceled','cancel')
         self.scheduler.round()
-        self.assertNotIn('canceled',read(admission_path(self.engines[0].c))['grants'])
+        self.assertNotIn('canceled',active_grants(self.engines[0].c))
         self.rounds()
         self.assertEqual(self.state('canceled')['phase'],'canceled')
         self.assertFalse(self.engines[0].processes.handles)
@@ -102,7 +102,7 @@ class Scheduling(unittest.TestCase):
 
     def test_missing_ledger_refuses_new_admission(self):
         self.put('running','a',[]);self.rounds()
-        path=admission_path(self.engines[0].c);backup=path.read_bytes();path.unlink()
+        path=self.root/'tasks/running/grant.json';backup=path.read_bytes();path.unlink()
         try:
             self.put('waiting','b',[])
             for engine in self.engines:engine.round()
@@ -113,7 +113,7 @@ class Scheduling(unittest.TestCase):
     def test_scheduler_is_an_ordinary_service_and_can_restart_independently(self):
         self.scheduler.close();self.scheduler=None
         declaration=dict(kind='Service',id='scheduler-service',node='a',
-                         version=1,desired='online',restart='always',argv=[sys.executable,'-B',
+                         desired='online',restart='always',argv=[sys.executable,'-B',
                          str(Path(__file__).resolve().parents[1]/'tools/scheduler.py'),'--root',str(self.base/'a'),'--max-concurrent','2'])
         from runtime.services import publish as put_service,get as get_service,set_intent
         c=self.engines[0].c;put_service(c,declaration)
@@ -133,7 +133,7 @@ class Scheduling(unittest.TestCase):
         def state(node,tid):return get_service(self.engines[node].c,tid)[1]
         ds=[]
         for i,node in enumerate(('a','b')):
-            d=dict(kind='Service',id='svc-'+node,node=node,version=1,desired='online',restart='manual',
+            d=dict(kind='Service',id='svc-'+node,node=node,desired='online',restart='manual',
                    resources=['exclusive'],argv=[sys.executable,'-c','import time;time.sleep(100)'])
             put_service(self.engines[0].c,d);ds.append(d)
         self.until(lambda:state(0,'svc-a') and state(0,'svc-a')['phase']=='running')
@@ -146,13 +146,13 @@ class Scheduling(unittest.TestCase):
     def test_offline_service_can_start_and_replace_its_resource_version(self):
         from runtime.services import publish as put_service,get as get_service,set_intent
         c=self.engines[0].c
-        d=dict(kind='Service',id='resource-service',node='a',version=1,desired='offline',restart='manual',
+        d=dict(kind='Service',id='resource-service',node='a',desired='offline',restart='manual',
                resources=['repo'],argv=[sys.executable,'-c','import time;time.sleep(100)'])
         put_service(c,d);set_intent(c,d,'online')
         self.until(lambda:(get_service(c,d['id'])[1] or {}).get('phase')=='running')
         first=get_service(c,d['id'])[1]['runId']
-        updated=dict(d,version=2,desired='online',env={'VERSION':'2'});put_service(c,updated)
-        self.until(lambda:(get_service(c,d['id'])[1] or {}).get('runVersion')==2 and get_service(c,d['id'])[1]['phase']=='running')
+        updated=dict(d,desired='online',env={'VERSION':'2'});put_service(c,updated)
+        self.until(lambda:(get_service(c,d['id'])[1] or {}).get('runId')!=first and get_service(c,d['id'])[1]['phase']=='running')
         self.assertNotEqual(first,get_service(c,d['id'])[1]['runId'])
 
 if __name__=='__main__':unittest.main()

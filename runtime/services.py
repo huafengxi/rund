@@ -96,3 +96,25 @@ def get(c,identifier):
     found=objects(c);require(identifier in found,'object not found: '+identifier)
     p,d=found[identifier];s=p.with_name('state.json')
     return d,read(s) if s.exists() else None
+
+
+def source_issue(c,d):
+    """A tagged dependency is ready only in its one configured checkout."""
+    if not d.get('repos'):return None
+    try:
+        registry=read(Path(c['configRoot'])/'repos.json')
+        for repo,tag in d['repos'].items():
+            spec=registry[repo]
+            require(not spec.get('nodes') or c['node'] in spec['nodes'],'repository not assigned to node: '+repo)
+            path=Path(spec['path']).expanduser()
+            require(path.is_absolute(),'absolute repository path required')
+            def git(*args):
+                p=subprocess.run(['git','-C',str(path),*args],capture_output=True,text=True,timeout=10)
+                require(p.returncode==0,'Git dependency unavailable: '+repo+'@'+tag)
+                return p.stdout.strip()
+            expected=git('rev-parse','--verify','refs/tags/'+tag+'^{commit}')
+            require(git('rev-parse','HEAD')==expected,'awaiting '+repo+'@'+tag)
+            require(not git('status','--porcelain','-uno'),'dependency has tracked edits: '+repo)
+        return None
+    except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as e:
+        return 'source dependency: '+str(e)

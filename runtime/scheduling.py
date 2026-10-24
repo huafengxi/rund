@@ -5,54 +5,40 @@ import time
 from pathlib import Path
 from .config import FINAL, node_config
 from .protocol import cancellation
-from .services import objects,wanted
+from .services import objects
 from .store import read, write, now, require, lock
-from .admission import admission_path, execution_digest
+from .admission import admission_path, execution_digest, grants as active_grants
 
 
 def reconcile(c, policy):
     found = objects(c)
-    path = admission_path(c)
-    if not path.exists():
-        for p,d in found.values():
-            sp=p.with_name('state.json')
-            if 'resources' in d and sp.exists():
-                if read(sp)['phase'] in ('starting','running','canceling','stopping','unknown'):
-                    raise ValueError('restore missing admission record before scheduling')
-    prior = read(path) if path.exists() else {'node': c['node'], 'grants': {}}
-    require(prior['node'] == c['node'], 'scheduler record belongs to another node')
-    grants = dict(prior['grants'])
-    held = set()
-    for tid in list(grants):
-        entry = found.get(tid)
-        # Missing inputs or outcomes retain the reservation until resolved.
-        if entry is None:
-            return
-        p, d = entry
-        s = read(p.with_name('state.json')) if p.with_name('state.json').exists() else None
+    grants=active_grants(c)
+    for tid,(p,d) in found.items():
+        sp=p.with_name('state.json')
+        if 'resources' in d and sp.exists() and tid not in grants:
+            if read(sp)['phase'] in ('starting','running','canceling','stopping','unknown'):
+                raise ValueError('restore missing admission record before scheduling: '+tid)
+    held=set()
+    for tid,(path,grant) in list(grants.items()):
+        entry=found.get(tid)
+        if entry is None:return
+        p,d=entry;s=read(p.with_name('state.json')) if p.with_name('state.json').exists() else None
         if s and (s['phase'] in FINAL or d['kind']=='Service' and (s['phase'] in ('stopped','backoff','preparing') or
-                s['phase']=='queued' and s.get('waitObserved') and grants[tid]!=execution_digest(d))):
+                s['phase']=='queued' and s.get('waitObserved') and grant['executionDigest']!=execution_digest(d))):
+            write(path,dict(grant,active=False,updatedAt=now()))
             del grants[tid]
-        else:
-            held.update(d.get('resources', []))
-    queue = []
-    for tid, (p, d) in found.items():
-        if 'resources' not in d or tid in grants or d['kind']=='Task' and cancellation(p) is not None:
-            continue
-        sp = p.with_name('state.json')
-        s = read(sp) if sp.exists() else None
-        if s and s['phase'] == 'queued':
-            queue.append((s.get('queuedAt', s['updatedAt']), tid, d))
-    for _, tid, d in sorted(queue):
-        if len(grants) >= policy.get('maxConcurrent', 4):
-            break
-        if held.intersection(d['resources']):
-            continue
-        grants[tid] = execution_digest(d)
-        held.update(d['resources'])
-    limit=policy.get('maxConcurrent',4)
-    if grants != prior['grants'] or prior.get('maxConcurrent') != limit or not path.exists():
-        write(path, {'node': c['node'], 'grants': grants, 'maxConcurrent': limit, 'updatedAt': now()})
+        else:held.update(grant['resources'])
+    queue=[]
+    for tid,(p,d) in found.items():
+        if 'resources' not in d or tid in grants or d['kind']=='Task' and cancellation(p) is not None:continue
+        sp=p.with_name('state.json');s=read(sp) if sp.exists() else None
+        if s and s['phase']=='queued':queue.append((s.get('queuedAt',s['updatedAt']),tid,d))
+    for _,tid,d in sorted(queue):
+        if len(grants)>=policy.get('maxConcurrent',4):break
+        if held.intersection(d['resources']):continue
+        grant=dict(node=c['node'],id=tid,active=True,executionDigest=execution_digest(d),resources=d['resources'],updatedAt=now())
+        path=admission_path(c,d);write(path,grant)
+        grants[tid]=(path,grant);held.update(d['resources'])
 
 
 class Scheduler:

@@ -71,7 +71,7 @@ class Objects(unittest.TestCase):
         self.assertEqual(get(self.c['sharedRoot'],'task')[0],d)
         with self.assertRaises(ValueError):desired(self.c['sharedRoot'],'task','run')
     def test_service_restart_has_direct_process_and_no_child_task(self):
-        d=dict(kind='Service',id='svc',node='a',version=1,desired='online',restart='always',argv=[sys.executable,'-c','pass'])
+        d=dict(kind='Service',id='svc',node='a',desired='online',restart='always',argv=[sys.executable,'-c','pass'])
         self.put(d);first=self.until(lambda:self.state('svc') and self.state('svc').get('runId'))
         self.until(lambda:self.state('svc')['runId']!=first)
         self.assertFalse(any(v['kind']=='Task' for _,v in self.o.objects.values()))
@@ -79,7 +79,7 @@ class Objects(unittest.TestCase):
         set_intent(self.c,d,'offline');self.until(lambda:self.state('svc')['phase']=='stopped')
         self.assertTrue(self.state('svc')['waitObserved'])
     def test_service_offline_then_online(self):
-        d=dict(kind='Service',id='svc',node='a',version=1,desired='offline',restart='manual',argv=[sys.executable,'-c','import time;time.sleep(100)'])
+        d=dict(kind='Service',id='svc',node='a',desired='offline',restart='manual',argv=[sys.executable,'-c','import time;time.sleep(100)'])
         self.put(d);self.o.round();self.assertEqual(self.state('svc')['phase'],'stopped')
         from runtime.services import set_intent
         set_intent(self.c,d,'online');self.until(lambda:self.state('svc')['phase']=='running')

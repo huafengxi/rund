@@ -36,10 +36,10 @@ class Versions(unittest.TestCase):
         self.assertEqual(publish(root,self.d),p)
         with self.assertRaises(ValueError):publish(root,dict(self.d,argv=['/bin/false']))
         self.assertEqual(p.read_bytes(),before)
-        service=dict(kind='Service',id='service',node='hub',argv=['/bin/true'],version=1,desired='offline',restart='manual')
+        service=dict(kind='Service',id='service',node='hub',argv=['/bin/true'],desired='offline',restart='manual')
         sp=publish(root,service)
-        publish(root,dict(service,version=2,argv=['/bin/false']))
-        self.assertEqual(read(sp)['version'],2)
+        publish(root,dict(service,argv=['/bin/false']))
+        self.assertEqual(read(sp)['argv'],['/bin/false'])
         self.assertEqual(list(sp.parent.glob('declaration*.json')),[sp])
     def test_shared_service_history_does_not_block_task_publication(self):
         root=self.root/'shared'
@@ -77,15 +77,16 @@ class Versions(unittest.TestCase):
         self.assertEqual(read(self.root/'local/accepted.json')['demo']['path'],'tasks/demo/declaration.json')
     def test_migration_collapses_checkout_versions_and_preserves_new_current(self):
         folder=self.root/'config/objects/services/service'
-        d=dict(kind='Service',id='service',node='hub',argv=['/bin/true'],version=1,desired='offline',restart='manual')
-        write(folder/'declaration-v1.json',d)
-        write(folder/'declaration-v12.json',dict(d,version=2))
+        d=dict(kind='Service',id='service',node='hub',argv=['/bin/true'],desired='offline',restart='manual')
+        write(folder/'declaration-v1.json',dict(d,version=1))
+        write(folder/'declaration-v12.json',dict(d,version=2,env={'REVISION':'2'}))
         migrate(self.root)
-        self.assertEqual(read(folder/'declaration.json')['version'],2)
+        self.assertNotIn('version',read(folder/'declaration.json'))
+        self.assertEqual(read(folder/'declaration.json')['env'],{'REVISION':'2'})
         self.assertFalse(list(folder.glob('declaration-v*.json')))
-        write(folder/'declaration.json',dict(d,version=3))
+        write(folder/'declaration.json',dict(d,env={'REVISION':'3'}))
         migrate(self.root)
-        self.assertEqual(read(folder/'declaration.json')['version'],3)
+        self.assertEqual(read(folder/'declaration.json')['env'],{'REVISION':'3'})
     def test_sync_uses_hub_and_conventional_transport_paths(self):
         argv,env=command(self.root,'once')
         self.assertIn('hub:'+str(self.root/'hub/shared'),argv)

@@ -14,7 +14,8 @@ def members(p):
     return [v for pid in ids if (v:=identity(pid)) and v['pgid']==p['pgid']]
 
 def expand(value,c,task):
-    mapping={'shared':c['sharedRoot'],'private':c['privateRoot'],'artifacts':str(Path(c['privateRoot'])/'artifacts'),'work':c.get('workDir',str(Path(c['privateRoot'])/'tasks'/task/'work')),'config':c.get('configRoot',str(Path(c['privateRoot']).parent/'config')),'home':c['home'],'node':c['node'],'runtime':c.get('runtimeSource',str(Path(__file__).resolve().parents[1]))}
+    mapping={'shared':c['sharedRoot'],'private':c['privateRoot'],'work':c.get('workDir',str(Path(c['privateRoot'])/'tasks'/task/'work')),'config':c.get('configRoot',str(Path(c['privateRoot']).parent/'config')),'home':c['home'],'node':c['node'],'runtime':c.get('runtimeSource',str(Path(__file__).resolve().parents[1]))}
+    if '${artifacts}' in value:mapping['artifacts']=str(Path(c['privateRoot'])/'artifacts')
     for k,v in mapping.items():value=value.replace('${'+k+'}',v)
     require('${' not in value,'unknown execution placeholder')
     return c['home']+value[1:] if value=='~' or value.startswith('~/') else value

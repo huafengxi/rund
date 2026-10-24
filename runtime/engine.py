@@ -18,7 +18,7 @@ class Engine:
         self.fd=lock(self.private/'locks/runtime.lock');self.processes=Processes(c)
         self.accepted_path=self.private/'accepted.json';self.accepted=read(self.accepted_path) if self.accepted_path.exists() else {}
         self.objects={};self.errors=[]
-        for k in ('artifacts','tasks','services'):directory(self.private/k)
+        for k in ('tasks','services'):directory(self.private/k)
         from .native import identity
         self.identity=identity(os.getpid());write(self.private/'runtime.json',dict(self.identity,node=c['node'],startedAt=now(),diagnostics=[],status='running',runtimeRevision=c.get('runtimeRevision')))
     def close(self):os.close(self.fd)
@@ -36,7 +36,7 @@ class Engine:
     def initial(self,d):
         base=dict(kind=d['kind'],id=d['id'],node=d['node'],declarationDigest=digest(d),updatedAt=None,reason=None,
                   process=None,startedAt=None,finishedAt=None,exitCode=None,signal=None,waitObserved=False,runtimeRevision=self.c.get('runtimeRevision'))
-        if d['kind']=='Service':return dict(base,phase='stopped',runId=None,runVersion=None,nextStartAt=None,restartCount=0)
+        if d['kind']=='Service':return dict(base,phase='stopped',runId=None,nextStartAt=None,restartCount=0)
         return dict(base,phase='accepted')
     def accept(self):
         found=services.objects(self.c);self.errors=[]
@@ -106,7 +106,11 @@ class Engine:
         s=self.state(p) or self.initial(d)
         require('currentTask' not in s,'legacy Service state must be archived before migration')
         wanted='offline' if self.stopped or d['id'] in getattr(self,'removed',set()) else services.wanted(self.c,d)
-        incompatible=s.get('runVersion') is not None and s['runVersion']!=d['version']
+        incompatible=s.get('runId') is not None and s.get('declarationDigest')!=digest(d)
+        if incompatible and wanted!='offline':
+            source_issue=services.source_issue(self.c,d)
+            if source_issue:
+                self.save(p,s,reason=source_issue);return
         active=s['phase'] in ('starting','running','stopping','unknown','blocked') and s.get('runId')
         if active:
             fact=self.processes.observe(d['id'],s['process'])
@@ -124,7 +128,7 @@ class Engine:
             self.save(p,s,phase='stopped',finishedAt=now(),exitCode=rc if rc>=0 else None,signal=-rc if rc<0 else None,waitObserved=True,
                       reason='execution replaced' if incompatible else 'stopped by request' if wanted=='offline' or s.get('stopStep') else 'process exited')
         if wanted=='offline':
-            self.save(p,s,declarationDigest=digest(d),phase='stopped',nextStartAt=None,reason='stopped by request');return
+            self.save(p,s,phase='stopped',nextStartAt=None,reason='stopped by request');return
         first=s.get('runId') is None
         requested=s.get('reason') in ('stopped by request','execution replaced')
         if not first and not incompatible and not requested and s['phase'] not in ('preparing','queued'):
@@ -134,12 +138,14 @@ class Engine:
                 n=s.get('restartCount',0)+1;self.save(p,s,phase='backoff',restartCount=n,nextStartAt=time.time()+min(30,.5*2**min(n-1,6)),reason='restart policy');return
             if time.time()<s['nextStartAt']:return
         if self.paused:return
+        source_issue=services.source_issue(self.c,d)
+        if source_issue:self.save(p,s,phase='preparing',reason=source_issue);return
         missing=[f for f in d.get('needs',[]) if not Path(expand(f,self.c,d['id'])).is_file()]
         if missing:self.save(p,s,phase='preparing',reason='missing files: '+', '.join(missing));return
         if 'resources' in d and not admitted(self.c,d):
             self.save(p,s,phase='queued',queuedAt=s.get('queuedAt') or now(),reason='awaiting global admission');return
         run=uuid.uuid4().hex
-        self.save(p,s,phase='starting',runId=run,runVersion=d['version'],declarationDigest=digest(d),process=None,
+        self.save(p,s,phase='starting',runId=run,declarationDigest=digest(d),process=None,
                   nextStartAt=None,startedAt=None,finishedAt=None,exitCode=None,signal=None,waitObserved=False,
                   stopStep=0,reason='spawn intent',runtimeRevision=self.c.get('runtimeRevision'))
         try:
