@@ -51,8 +51,8 @@ def migrate(root):
                 converted=convert(before)
                 # Cancel is independent and is published before its immutable definition.
                 cancel(target,before)
-                write(target,converted)
-                if source!=target or before!=converted:files.append(str(target))
+                if source!=target or before!=converted:
+                    write(target,converted);files.append(str(target))
                 if tree==Path(c['configRoot'])/'objects':
                     for p in versions:p.unlink()
         from runtime.services import declarations

@@ -87,6 +87,15 @@ class Versions(unittest.TestCase):
         write(folder/'declaration.json',dict(d,env={'REVISION':'3'}))
         migrate(self.root)
         self.assertEqual(read(folder/'declaration.json')['env'],{'REVISION':'3'})
+    def test_migration_preserves_current_declaration_bytes(self):
+        import json
+        folder=self.root/'config/objects/services/service'
+        d=dict(kind='Service',id='service',node='hub',argv=['/bin/true'],desired='offline',restart='manual')
+        folder.mkdir(parents=True)
+        p=folder/'declaration.json';p.write_text(json.dumps(d,indent=2)+'\n')
+        before=p.read_bytes();migrate(self.root);migrate(self.root)
+        self.assertEqual(p.read_bytes(),before)
+
     def test_sync_uses_hub_and_conventional_transport_paths(self):
         argv,env=command(self.root,'once')
         self.assertIn('hub:'+str(self.root/'hub/shared'),argv)
